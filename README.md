@@ -45,14 +45,70 @@ Copilot Task Master is a VS Code extension that helps you manage your tasks seam
 
 ### Copilot Chat
 
-You can interact with your tasks using Copilot Chat. Make sure the "Task Manager" tool is enabled for Copilot.
+You can interact with your tasks using Copilot Chat. Ensure the "Task Manager" tool (`task_manager_tool`) is available and enabled in your Copilot Chat session.
 
-Examples:
+**Basic Operations:**
 
-- `@manageTasks list tasks`
-- `@manageTasks add task "My new important task"`
-- `@manageTasks add task "Refactor the main module" with description "Rewrite the core logic for better performance"`
-- `@manageTasks complete task "ID_OF_THE_TASK"` (You can find the ID by listing tasks)
+*   **List all tasks:**
+    ```
+    @task_manager_tool list
+    ```
+    *(This will output a list of your tasks with their IDs, titles, completion status, and order.)*
+
+*   **Add a new task:**
+    ```
+    @task_manager_tool add taskTitle="My new important task"
+    ```
+    ```
+    @task_manager_tool add taskTitle="Refactor the main module" taskDescription="Rewrite the core logic for better performance"
+    ```
+
+*   **Add a new subtask:**
+    *(You'll need the `parentId` from the list tasks output.)*
+    ```
+    @task_manager_tool add taskTitle="Develop feature X" parentId="ID_OF_THE_PARENT_TASK"
+    ```
+
+*   **Toggle task completion status:**
+    *(Toggles between complete and incomplete if `taskStatus` is not provided. You'll need the `taskId`.)*
+    ```
+    @task_manager_tool toggleComplete taskId="ID_OF_THE_TASK"
+    ```
+    *To explicitly set completion status:*
+    ```
+    @task_manager_tool toggleComplete taskId="ID_OF_THE_TASK" taskStatus=true  // Marks as complete
+    ```
+    ```
+    @task_manager_tool toggleComplete taskId="ID_OF_THE_TASK" taskStatus=false // Marks as incomplete
+    ```
+
+*   **Delete all completed tasks:**
+    ```
+    @task_manager_tool deleteCompleted
+    ```
+
+**Batch Operations:**
+
+The `batch` operation allows you to perform multiple actions in a single call. This is useful for more complex modifications, including deleting specific tasks.
+
+*   **Delete a specific task:**
+    *(You'll need the `taskId`.)*
+    ```
+    @task_manager_tool batch batchPayload={"operations":[{"action":"delete","taskId":"ID_OF_THE_TASK_TO_DELETE"}]}
+    ```
+
+*   **Perform multiple operations at once:**
+    *(Example: Add a new task, complete an existing task, and delete another specific task.)*
+    ```
+    @task_manager_tool batch batchPayload={"operations":[
+      {"action":"add","taskTitle":"New batch task","taskDescription":"This was added in a batch"},
+      {"action":"toggleComplete","taskId":"ID_OF_EXISTING_TASK_1","taskStatus":true},
+      {"action":"delete","taskId":"ID_OF_EXISTING_TASK_2"}
+    ]}
+    ```
+    *(Remember to replace `"ID_OF_..."` with actual task IDs from your list.)*
+
+**Note:** When providing string values like `taskTitle`, `taskDescription`, `taskId`, or `parentId` directly in the Copilot chat, ensure they are properly quoted if they contain spaces or special characters, following the requirements of the chat interface. The `batchPayload` is a JSON string.
 
 ## Development
 
