@@ -35,7 +35,8 @@
                 "list",
                 "add",
                 "toggleComplete",
-                "deleteCompleted"
+                "deleteCompleted",
+                "batch"
               ]
             },
             "taskId": {
@@ -57,6 +58,50 @@
             "taskStatus": {
               "type": "boolean",
               "description": "The desired completion status (true for complete, false for incomplete). Required for 'toggleComplete' operation if you want to set a specific status, otherwise it will toggle."
+            },
+            "batchPayload": {
+              "type": "object",
+              "description": "Payload for batch operations.",
+              "properties": {
+                "operations": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "action": {
+                        "type": "string",
+                        "enum": [
+                          "add",
+                          "toggleComplete",
+                          "delete"
+                        ],
+                        "description": "The action to perform for this task in the batch."
+                      },
+                      "taskId": {
+                        "type": "string"
+                      },
+                      "taskTitle": {
+                        "type": "string"
+                      },
+                      "taskDescription": {
+                        "type": "string"
+                      },
+                      "parentId": {
+                        "type": "string"
+                      },
+                      "taskStatus": {
+                        "type": "boolean"
+                      }
+                    },
+                    "required": [
+                      "action"
+                    ]
+                  }
+                }
+              },
+              "required": [
+                "operations"
+              ]
             }
           },
           "required": [

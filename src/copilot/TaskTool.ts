@@ -3,16 +3,35 @@ import { ITask } from '../common/Task';
 import { ITaskProvider } from '../mcp/ITaskProvider';
 
 /**
- * Interface for the input parameters of the Task Manager tool.
- * Matches the inputSchema defined in package.json.
+ * Represents a single operation within a batch request.
  */
-interface ITaskToolInput {
-  operation: 'list' | 'add' | 'toggleComplete' | 'deleteCompleted';
+interface ITaskOperation {
+  action: 'add' | 'toggleComplete' | 'delete';
   taskId?: string;
   taskTitle?: string;
   taskDescription?: string;
   parentId?: string;
   taskStatus?: boolean;
+}
+
+/**
+ * Payload for batch task operations.
+ */
+interface IBatchTaskPayload {
+  operations: ITaskOperation[];
+}
+
+/**
+ * Interface for the input parameters of the Task Manager tool.
+ */
+interface ITaskToolInput {
+  operation: 'list' | 'add' | 'toggleComplete' | 'deleteCompleted' | 'batch';
+  taskId?: string;
+  taskTitle?: string;
+  taskDescription?: string;
+  parentId?: string;
+  taskStatus?: boolean;
+  batchPayload?: IBatchTaskPayload;
 }
 
 /**
@@ -79,9 +98,16 @@ export class TaskTool implements vscode.LanguageModelTool<ITaskToolInput> {
         }
         break;
       }
-      case 'deleteCompleted': // Added case for deleteCompleted
+      case 'deleteCompleted':
         title = 'Delete Completed Tasks';
         message = 'Are you sure you want to delete all completed tasks?';
+        break;
+      case 'batch':
+        title = 'Batch Task Operations';
+        if (!input.batchPayload || input.batchPayload.operations.length === 0) {
+          throw new vscode.LanguageModelError('Batch payload with at least one operation is required.');
+        }
+        message = `Perform ${input.batchPayload.operations.length} task operations in batch?`;
         break;
       default: {
         const _exhaustiveCheck: never = input.operation;
@@ -195,7 +221,6 @@ export class TaskTool implements vscode.LanguageModelTool<ITaskToolInput> {
           return new vscode.LanguageModelToolResult([new vscode.LanguageModelTextPart(actionMessage)]);
         }
         case 'deleteCompleted': {
-          // Added case for deleteCompleted
           if (token.isCancellationRequested) {
             throw new vscode.LanguageModelError('Delete completed tasks cancelled.');
           }
@@ -213,6 +238,87 @@ export class TaskTool implements vscode.LanguageModelTool<ITaskToolInput> {
           }
 
           return new vscode.LanguageModelToolResult([new vscode.LanguageModelTextPart(resultMessage)]);
+        }
+        case 'batch': {
+          if (!input.batchPayload) {
+            throw new vscode.LanguageModelError('Batch payload is required for batch operation.');
+          }
+          if (token.isCancellationRequested) {
+            throw new vscode.LanguageModelError('Batch task operation cancelled by user.');
+          }
+
+          const results: string[] = [];
+          for (const op of input.batchPayload.operations) {
+            if (token.isCancellationRequested) {
+              results.push(`Operation cancelled before processing: ${op.action} ${op.taskId || op.taskTitle}`);
+              break;
+            }
+            try {
+              switch (op.action) {
+                case 'add': {
+                  if (!op.taskTitle) {
+                    throw new Error('Task title is required for add operation in batch.');
+                  }
+                  const taskData: Partial<ITask> = {
+                    title: op.taskTitle,
+                    description: op.taskDescription || '',
+                  };
+                  if (op.parentId) {
+                    taskData.parentId = op.parentId;
+                  }
+                  const newTask = await this.taskProvider.createTask(
+                    taskData as Omit<ITask, 'id' | 'completed' | 'order'>,
+                  );
+                  results.push(`Task added with ID: ${newTask.id}`);
+                  break;
+                }
+                case 'toggleComplete': {
+                  if (!op.taskId) {
+                    throw new Error('Task ID is required for toggleComplete operation in batch.');
+                  }
+                  let newCompletedStatus: boolean;
+                  if (typeof op.taskStatus === 'boolean') {
+                    newCompletedStatus = op.taskStatus;
+                  } else {
+                    const currentTask = await this.taskProvider.getTask(op.taskId);
+                    if (!currentTask) {
+                      throw new Error(`Task with ID "${op.taskId}" not found.`);
+                    }
+                    newCompletedStatus = !currentTask.completed;
+                  }
+                  await this.taskProvider.updateTask(op.taskId, { completed: newCompletedStatus });
+                  results.push(
+                    `Task ${op.taskId} status set to ${newCompletedStatus ? 'complete' : 'incomplete'}.`,
+                  );
+                  break;
+                }
+                case 'delete': {
+                  if (!op.taskId) {
+                    throw new Error('Task ID is required for delete operation in batch.');
+                  }
+                  // Assuming taskProvider has a deleteTask method.
+                  // This was confirmed to exist in ITaskProvider during planning.
+                  const deleted = await this.taskProvider.deleteTask(op.taskId);
+                  if (deleted) {
+                    results.push(`Task ${op.taskId} deleted.`);
+                  } else {
+                    results.push(`Task ${op.taskId} not found or failed to delete.`);
+                  }
+                  break;
+                }
+                default:{
+                  // To satisfy the exhaustive check for op.action, explicitly cast to any
+                  // if specific actions are not handled, or add more cases.
+                  results.push(`Unknown action: ${(op as any).action}`);
+                }
+              }
+            } catch (e: any) {
+              results.push(
+                `Error processing operation (${op.action} ${op.taskId || op.taskTitle || ''}): ${e.message}`,
+              );
+            }
+          }
+          return new vscode.LanguageModelToolResult([new vscode.LanguageModelTextPart(results.join('\n'))]);
         }
         default: {
           const _exhaustiveCheck: never = input.operation;
