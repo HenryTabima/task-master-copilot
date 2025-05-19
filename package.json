@@ -122,6 +122,16 @@
         "icon": "$(symbol-misc)"
       },
       {
+        "command": "copilot-task-master.refreshTasksView",
+        "title": "Refresh Tasks View",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "copilot-task-master.createTask",
+        "title": "Create Task",
+        "icon": "$(add)"
+      },
+      {
         "command": "copilot-task-master.markTaskAsComplete",
         "title": "Mark Task as Complete",
         "icon": "$(check)"
@@ -147,19 +157,18 @@
         "icon": "$(pencil)"
       },
       {
-        "command": "copilot-task-master.createTask",
-        "title": "Create Task",
-        "icon": "$(add)"
-      },
-      {
-        "command": "fulcrum.createSubTask",
-        "title": "Create Sub-task",
-        "icon": "$(add)"
-      },
-      {
         "command": "copilot-task-master.deleteCompletedTasksFromUI",
         "title": "Delete Completed Tasks",
         "icon": "$(clear-all)"
+      },
+      {
+        "command": "copilot-task-master.resetInstructionFile",
+        "title": "Reset Copilot Task Master Instruction File"
+      },
+      {
+        "command": "copilot-task-master.createSubTask",
+        "title": "Create Sub-Task",
+        "icon": "$(add)"
       }
     ],
     "viewsContainers": {
@@ -233,7 +242,7 @@
           "icon": "$(trash)"
         },
         {
-          "command": "fulcrum.createSubTask",
+          "command": "copilot-task-master.createSubTask",
           "when": "view == copilot-task-master.tasksView",
           "group": "inline@4",
           "icon": "$(add)"

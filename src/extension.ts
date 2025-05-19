@@ -10,74 +10,9 @@ import * as path from 'path'; // Import path module
 import * as os from 'os'; // Import os module
 
 const INSTRUCTION_FILE_NAME = 'copilot-task-master-workflow.instructions.md';
-const EXPECTED_INSTRUCTION_KEYWORDS = ['TaskTool', 'Copilot Task Master workflow']; // Keywords to check for
+// const INSTRUCTION_FILE_RELATIVE_PATH = 'prompts/copilot-task-master-workflow.instructions.md'; // Not strictly needed here if we use INSTRUCTION_FILE_NAME with the dir Uri
 
-/**
- * Attempts to get the user-level Copilot instructions directory URI.
- * This is an approximation as there isn't a direct VS Code API for this specific path.
- */
-function getUserCopilotInstructionsDirUri(context: vscode.ExtensionContext): vscode.Uri | undefined {
-  // globalStorageUri is typically: /Users/username/Library/Application Support/Code/User/globalStorage/publisher.extensionName
-  // We want to navigate to: /Users/username/Library/Application Support/Code/User/prompts
-
-  // On macOS, the path is usually ~/Library/Application Support/Code/User or Code - Insiders/User
-  // On Windows, %APPDATA%\Code\User or %APPDATA%\Code - Insiders\User
-  // On Linux, ~/.config/Code/User or ~/.config/Code - Insiders/User
-
-  // A more direct approach for macOS, assuming standard VS Code or Insiders name
-  // This is still a heuristic and might not cover all edge cases (e.g., custom portable mode paths)
-  const homeDir = os.homedir(); // Use os.homedir()
-  if (!homeDir) {
-    vscode.window.showWarningMessage('Could not determine home directory. Skipping instruction file check.');
-    return undefined;
-  }
-
-  const appSupportPath = path.join(homeDir, 'Library', 'Application Support');
-  let userCodePath: string | undefined;
-
-  // Check for Insiders version first, then stable
-  const insidersPath = path.join(appSupportPath, 'Code - Insiders', 'User');
-  const stablePath = path.join(appSupportPath, 'Code', 'User');
-
-  // This is a simplified check. A real implementation might need to be more robust
-  // or rely on VS Code to provide a more direct way to get this path.
-  // For now, we'll try to see if one of these paths exists.
-  // However, directly checking fs.stat here from extension.ts might be problematic
-  // without async/await and proper error handling for path checking.
-  // Let's assume the path based on the application name if possible, otherwise fallback.
-
-  if (vscode.env.appName.includes('Insiders')) {
-    userCodePath = insidersPath;
-  } else if (vscode.env.appName.includes('Code')) {
-    userCodePath = stablePath;
-  } else {
-    // Fallback if appName is not as expected, try globalStorageUri parent
-    // globalStorageUri path is like: file:///Users/user/Library/Application%20Support/Code%20-%20Insiders/User/globalStorage/publisher.extension
-    const globalStorageParent = vscode.Uri.joinPath(context.globalStorageUri, '../..'); // up to .../User/
-    return vscode.Uri.joinPath(globalStorageParent, 'prompts');
-  }
-
-  if (userCodePath) {
-    return vscode.Uri.joinPath(vscode.Uri.file(userCodePath), 'prompts');
-  }
-
-  vscode.window.showWarningMessage('Could not reliably determine VS Code User directory for Copilot instructions.');
-  return undefined;
-}
-
-/**
- * Checks for the presence and basic content of the user-level instruction file.
- * Prompts the user to create or update it if necessary.
- */
-async function checkAndPromptForInstructionFile(context: vscode.ExtensionContext): Promise<void> {
-  const instructionFileDirUri = getUserCopilotInstructionsDirUri(context);
-
-  if (!instructionFileDirUri) {
-    return;
-  }
-
-  const instructionFileUri = vscode.Uri.joinPath(instructionFileDirUri, INSTRUCTION_FILE_NAME);
-  const predefinedContent = `---
+const PREDEFINED_INSTRUCTION_CONTENT_TEMPLATE = `---
 applyTo: '**'
 ---
 ## Planning Process
@@ -122,61 +57,89 @@ When you need to manage tasks, please use the \`TaskTool\`. Here are some genera
 Refer to the capabilities of the \`TaskTool\` for more specific commands and actions.
 `;
 
-  const updateButton = 'Update with Template';
-  const createButton = 'Create with Template';
+/**
+ * Attempts to get the user-level Copilot instructions directory URI.
+ * This is an approximation as there isn't a direct VS Code API for this specific path.
+ */
+function getUserCopilotInstructionsDirUri(context: vscode.ExtensionContext): vscode.Uri | undefined {
+  const homeDir = os.homedir();
+  if (!homeDir) {
+    vscode.window.showWarningMessage('Could not determine home directory. Skipping instruction file check.');
+    return undefined;
+  }
+
+  const appSupportPath = path.join(homeDir, 'Library', 'Application Support');
+  let userCodePath: string | undefined;
+
+  const insidersPath = path.join(appSupportPath, 'Code - Insiders', 'User');
+  const stablePath = path.join(appSupportPath, 'Code', 'User');
+
+  if (vscode.env.appName.includes('Insiders')) {
+    userCodePath = insidersPath;
+  } else if (vscode.env.appName.includes('Code')) {
+    userCodePath = stablePath;
+  } else {
+    const globalStorageParent = vscode.Uri.joinPath(context.globalStorageUri, '../..'); // up to .../User/
+    return vscode.Uri.joinPath(globalStorageParent, 'prompts');
+  }
+
+  if (userCodePath) {
+    return vscode.Uri.joinPath(vscode.Uri.file(userCodePath), 'prompts');
+  }
+
+  vscode.window.showWarningMessage('Could not reliably determine VS Code User directory for Copilot instructions.');
+  return undefined;
+}
+
+/**
+ * Checks for the presence and basic content of the user-level instruction file.
+ * Prompts the user to create or update it if necessary.
+ */
+async function checkAndPromptForInstructionFile(context: vscode.ExtensionContext): Promise<void> {
+  const instructionFileDirUri = getUserCopilotInstructionsDirUri(context);
+
+  if (!instructionFileDirUri) {
+    vscode.window.showWarningMessage('Could not determine Copilot instructions directory. Skipping instruction file check.');
+    return;
+  }
+
+  const instructionFileUri = vscode.Uri.joinPath(instructionFileDirUri, INSTRUCTION_FILE_NAME);
+  const createButton = 'Create File';
   const laterButton = 'Later';
+
   try {
     await vscode.workspace.fs.stat(instructionFileUri);
-    const contentBytes = await vscode.workspace.fs.readFile(instructionFileUri);
-    const content = new TextDecoder().decode(contentBytes);
-
-    const hasAllKeywords = EXPECTED_INSTRUCTION_KEYWORDS.every((keyword) => content.includes(keyword));
-
-    if (!hasAllKeywords) {
-      const selection = await vscode.window.showWarningMessage(
-        `The instruction file '${INSTRUCTION_FILE_NAME}' was found at '${instructionFileUri.fsPath}' but might not be correctly configured for the Copilot Task Master workflow (missing keywords: ${EXPECTED_INSTRUCTION_KEYWORDS.join(', ')}).`,
-        { modal: true },
-        updateButton,
-        laterButton,
-      );
-      if (selection === updateButton) {
-        await vscode.workspace.fs.writeFile(instructionFileUri, new TextEncoder().encode(predefinedContent));
-        vscode.window.showInformationMessage(
-          `Instruction file '${INSTRUCTION_FILE_NAME}' updated at '${instructionFileUri.fsPath}'.`,
-        );
-      }
-    } else {
-      // Optional: Notify only in development mode if needed, or remove for less noise
-      // if (context.extensionMode === vscode.ExtensionMode.Development) {
-      //  vscode.window.showInformationMessage(`Instruction file '${INSTRUCTION_FILE_NAME}' found and seems correctly configured.`);
-      // }
-    }
+    // File exists, do nothing in this initial check.
+    // The new command will handle resetting/overwriting.
+    // if (context.extensionMode === vscode.ExtensionMode.Development) {
+    //   vscode.window.showInformationMessage(`Instruction file '${INSTRUCTION_FILE_NAME}' already exists at '${instructionFileUri.fsPath}'.`);
+    // }
   } catch (error: unknown) {
+    // Assuming error means file not found
     if (error instanceof vscode.FileSystemError && error.code === 'FileNotFound') {
       const selection = await vscode.window.showInformationMessage(
-        `To optimize your workflow with Copilot Task Master, consider creating an instruction file ('${INSTRUCTION_FILE_NAME}') in your user profile's Copilot instructions directory: ${instructionFileDirUri.fsPath}.`,
+        `The Copilot Task Master workflow instruction file ('${INSTRUCTION_FILE_NAME}') was not found in your Copilot instructions directory ('${instructionFileDirUri.fsPath}'). Would you like to create it with the default template?`,
         { modal: true },
         createButton,
         laterButton,
       );
+
       if (selection === createButton) {
         try {
-          await vscode.workspace.fs.createDirectory(instructionFileDirUri); // Ensure directory exists
-        } catch (dirError: unknown) {
-          if (!(dirError instanceof vscode.FileSystemError && dirError.code === 'FileExists')) {
-            const message = dirError instanceof Error ? dirError.message : String(dirError);
-            vscode.window.showErrorMessage(`Failed to create directory for instruction file: ${message}`);
-            return;
-          }
+          // Ensure the directory exists before writing the file
+          await vscode.workspace.fs.createDirectory(instructionFileDirUri);
+          await vscode.workspace.fs.writeFile(instructionFileUri, new TextEncoder().encode(PREDEFINED_INSTRUCTION_CONTENT_TEMPLATE));
+          vscode.window.showInformationMessage(
+            `Instruction file '${INSTRUCTION_FILE_NAME}' created at '${instructionFileUri.fsPath}'. You may need to reload VS Code for Copilot to pick it up.`,
+          );
+        } catch (writeError: unknown) {
+          const message = writeError instanceof Error ? writeError.message : String(writeError);
+          vscode.window.showErrorMessage(`Failed to create instruction file '${instructionFileUri.fsPath}': ${message}`);
         }
-        await vscode.workspace.fs.writeFile(instructionFileUri, new TextEncoder().encode(predefinedContent));
-        vscode.window.showInformationMessage(
-          `Instruction file '${INSTRUCTION_FILE_NAME}' created at '${instructionFileUri.fsPath}'.`,
-        );
       }
     } else {
       const message = error instanceof Error ? error.message : String(error);
-      vscode.window.showErrorMessage(`Error accessing instruction file '${instructionFileUri.fsPath}': ${message}`);
+      vscode.window.showWarningMessage(`Could not check for instruction file: ${message}`);
     }
   }
 }
@@ -404,7 +367,7 @@ export async function activate(context: vscode.ExtensionContext) {
   context.subscriptions.push(createTaskCommand);
 
   const createSubTaskCommand = vscode.commands.registerCommand(
-    'fulcrum.createSubTask',
+    'copilot-task-master.createSubTask',
     async (parentTaskItem: TaskItem) => {
       if (!parentTaskItem || !parentTaskItem.task) {
         vscode.window.showWarningMessage('Cannot create sub-task: No parent task selected or parent task is invalid.');
@@ -443,7 +406,6 @@ export async function activate(context: vscode.ExtensionContext) {
     async () => {
       try {
         await taskTreeDataProvider.deleteCompletedTasks();
-        // The TaskTreeDataProvider.deleteCompletedTasks method already shows a message and refreshes.
       } catch (error) {
         vscode.window.showErrorMessage(
           `Failed to delete completed tasks from UI: ${error instanceof Error ? error.message : String(error)}`,
@@ -453,14 +415,37 @@ export async function activate(context: vscode.ExtensionContext) {
   );
   context.subscriptions.push(deleteCompletedTasksFromUICommand);
 
-  // Check for instruction file setup
-  await checkAndPromptForInstructionFile(context);
+  const resetInstructionFileCommand = vscode.commands.registerCommand('copilot-task-master.resetInstructionFile', async () => {
+    const instructionFileDirUri = getUserCopilotInstructionsDirUri(context);
+    if (!instructionFileDirUri) {
+      vscode.window.showErrorMessage('Could not determine Copilot instructions directory. Cannot reset instruction file.');
+      return;
+    }
+    const instructionFileUri = vscode.Uri.joinPath(instructionFileDirUri, INSTRUCTION_FILE_NAME);
 
-  // If TaskProvider had a dispose method, it should also be added to subscriptions
-  // if (typeof taskProvider.dispose === 'function') {
-  //   context.subscriptions.push(taskProvider);
-  // }
+    const confirmButton = 'Reset File';
+    const cancelButton = 'Cancel';
+    const selection = await vscode.window.showWarningMessage(
+      `Are you sure you want to reset the Copilot Task Master instruction file ('${INSTRUCTION_FILE_NAME}') to its default content? This will overwrite any existing content at '${instructionFileUri.fsPath}'.`,
+      { modal: true },
+      confirmButton,
+      cancelButton,
+    );
+
+    if (selection === confirmButton) {
+      try {
+        await vscode.workspace.fs.createDirectory(instructionFileDirUri); // createDirectory is idempotent
+        await vscode.workspace.fs.writeFile(instructionFileUri, new TextEncoder().encode(PREDEFINED_INSTRUCTION_CONTENT_TEMPLATE));
+        vscode.window.showInformationMessage(
+          `Instruction file '${INSTRUCTION_FILE_NAME}' has been reset to default content at '${instructionFileUri.fsPath}'. You may need to reload VS Code for Copilot to pick it up.`,
+        );
+      } catch (writeError: unknown) {
+        const message = writeError instanceof Error ? writeError.message : String(writeError);
+        vscode.window.showErrorMessage(`Failed to reset instruction file '${instructionFileUri.fsPath}': ${message}`);
+      }
+    }
+  });
+  context.subscriptions.push(resetInstructionFileCommand);
 }
 
-// This method is called when your extension is deactivated
 export function deactivate() {}
