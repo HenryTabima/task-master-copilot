@@ -42,45 +42,70 @@ export type TaskDb = {
 };
 
 /**
+ * Sanitizes a workspace path to be used as a directory name.
+ * Replaces common path separators with underscores and removes potentially problematic characters.
+ * @param fsPath The file system path of the workspace.
+ * @returns A sanitized string suitable for a directory name.
+ */
+function sanitizeWorkspacePathForDirectoryName(fsPath: string): string {
+  // Replace slashes and backslashes with underscores
+  let sanitized = fsPath.replace(/[/]/g, '_');
+  // Remove or replace other characters that might be problematic in directory names
+  sanitized = sanitized.replace(/[^a-zA-Z0-9_.-]/g, ''); // Keep alphanumeric, underscore, dot, hyphen
+  if (sanitized.startsWith('_')) {
+    sanitized = sanitized.substring(1);
+  }
+  if (sanitized.endsWith('_')) {
+    sanitized = sanitized.slice(0, -1);
+  }
+  // Ensure it's not empty
+  return sanitized || 'default_workspace';
+}
+
+/**
  * Creates and initializes the database
  * @param context The extension context to access storage paths
  * @returns A promise that resolves to a database instance
  */
 export async function createDatabase(context: vscode.ExtensionContext): Promise<TaskDb> {
-  // Dynamically import lowdb (ESM module)
   const lowdbModule = await import('lowdb');
   const nodeModule = await import('lowdb/node');
 
   const onDidChangeDataEmitter = new vscode.EventEmitter<void>();
 
-  // Get the extension's global storage path
-  const storageDirUri = context.globalStorageUri;
-  const dbFileUri = vscode.Uri.joinPath(storageDirUri, 'tasks-db.json');
-  const dbFilePath = dbFileUri.fsPath;
+  const workspaceFolders = vscode.workspace.workspaceFolders;
+  if (!workspaceFolders || workspaceFolders.length === 0) {
+    throw new Error('No workspace folder found. Cannot create a workspace-specific database.');
+  }
+  const workspaceUri = workspaceFolders[0].uri;
+  const sanitizedWorkspaceDirName = sanitizeWorkspacePathForDirectoryName(workspaceUri.fsPath);
 
-  // Ensure the global storage directory exists
+  // Use the extension's global storage path
+  const globalStorageUri = context.globalStorageUri;
+
+  // Create a subdirectory for this specific workspace within the global storage
+  const workspaceSpecificStorageDirUri = vscode.Uri.joinPath(globalStorageUri, sanitizedWorkspaceDirName);
+
+  // Ensure the global storage directory and the workspace-specific subdirectory exist
   try {
-    await vscode.workspace.fs.createDirectory(storageDirUri);
+    await vscode.workspace.fs.createDirectory(globalStorageUri);
+    await vscode.workspace.fs.createDirectory(workspaceSpecificStorageDirUri);
   } catch {
-    // If directory creation fails, lowdb will likely fail during adapter instantiation or write.
-    // No explicit error handling here to avoid linting issues with console.error
-    // and to let the subsequent operations signal the failure.
+    // It's possible the directory already exists, which is fine.
+    // If there's another error, lowdb will likely fail later, providing a more specific message.
   }
 
-  // Create a JSON file adapter
-  const adapter = new nodeModule.JSONFile<ITaskDatabase>(dbFilePath);
+  const dbFileUri = vscode.Uri.joinPath(workspaceSpecificStorageDirUri, 'tasks.json');
+  const dbFilePath = dbFileUri.fsPath;
 
-  // Create the database instance
+  const adapter = new nodeModule.JSONFile<ITaskDatabase>(dbFilePath);
   const lowDbInstance = new lowdbModule.Low<ITaskDatabase>(adapter, defaultDatabase);
 
-  // Load data from the file or use default if file doesn't exist
   await lowDbInstance.read();
 
-  // Ensure the database structure conforms to the expected schema
   if (!lowDbInstance.data) {
     lowDbInstance.data = defaultDatabase;
   } else {
-    // Make sure the structure is valid
     if (!Array.isArray(lowDbInstance.data.tasks)) {
       lowDbInstance.data.tasks = [];
     }
@@ -89,21 +114,18 @@ export async function createDatabase(context: vscode.ExtensionContext): Promise<
     }
   }
 
-  // Save the initialized database
   await lowDbInstance.write();
 
   const taskDbInstance: TaskDb = {
     data: lowDbInstance.data,
     read: async () => {
       await lowDbInstance.read();
-      // Ensure data is synchronized after read
       taskDbInstance.data = lowDbInstance.data;
     },
     write: async () => {
-      // Ensure data is synchronized before write
       lowDbInstance.data = taskDbInstance.data;
       await lowDbInstance.write();
-      onDidChangeDataEmitter.fire(); // Fire event after successful write
+      onDidChangeDataEmitter.fire();
     },
     _onDidChangeData: onDidChangeDataEmitter,
     onDidChangeData: onDidChangeDataEmitter.event,
