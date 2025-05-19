@@ -33,8 +33,10 @@ export class TaskTreeDataProvider implements vscode.TreeDataProvider<TaskItem> {
 
   constructor(
     private taskProvider: ITaskProvider,
-    taskDb: TaskDb,
+    taskDb: TaskDb, // Assuming TaskDb is correctly passed and used for change listening
   ) {
+    // If TaskDb emits an event when data changes (e.g., after saveToDatabase in TaskProvider),
+    // this will trigger a refresh.
     this.dbChangeListener = taskDb.onDidChangeData(() => {
       this.refresh();
     });
@@ -69,9 +71,10 @@ export class TaskTreeDataProvider implements vscode.TreeDataProvider<TaskItem> {
       return;
     }
 
+    // TaskProvider.deleteCompletedTasks has been updated to handle hierarchical deletion
     const numDeleted = await this.taskProvider.deleteCompletedTasks();
     if (numDeleted > 0) {
-      this.refresh();
+      this.refresh(); // Refresh the entire tree
       vscode.window.showInformationMessage(`${numDeleted} completed task(s) deleted.`);
     } else {
       vscode.window.showInformationMessage('No completed tasks to delete.');
@@ -93,28 +96,24 @@ export class TaskTreeDataProvider implements vscode.TreeDataProvider<TaskItem> {
    * @returns A promise that resolves to an array of children.
    */
   async getChildren(element?: TaskItem): Promise<TaskItem[]> {
-    // Fetch all tasks once to efficiently determine if any task has children.
-    // This is used to set the collapsibleState correctly for all items.
-
     if (element) {
-      // If an element is provided, we are fetching its children (sub-tasks).
-      // These are tasks whose parentId matches the element's task id.
-      const subTasks = await this.taskProvider.getTasks({ parentId: element.task.id });
-
-      return subTasks.map((task) => {
-        // For each sub-task, check if it has its own children (grand-children of the original element).
-        const collapsibleState = vscode.TreeItemCollapsibleState.Expanded;
+      // If an element is provided, we are fetching its children.
+      // The children are directly available in element.task.children.
+      const childrenTasks = element.task.children || [];
+      return childrenTasks.map((task) => {
+        const collapsibleState = (task.children && task.children.length > 0)
+          ? vscode.TreeItemCollapsibleState.Expanded
+          : vscode.TreeItemCollapsibleState.None;
         return new TaskItem(task, collapsibleState);
       });
     } else {
       // If no element is provided, we are fetching top-level tasks.
-      // These are tasks where parentId is null or undefined.
-      // The TaskProvider's getTasks({ parentId: null }) handles finding these.
-      const topLevelTasks = await this.taskProvider.getTasks({ parentId: null });
-
+      // TaskProvider.getTasks() now returns only top-level tasks.
+      const topLevelTasks = await this.taskProvider.getTasks();
       return topLevelTasks.map((task) => {
-        // For each top-level task, check if it has children.
-        const collapsibleState = vscode.TreeItemCollapsibleState.Expanded;
+        const collapsibleState = (task.children && task.children.length > 0)
+          ? vscode.TreeItemCollapsibleState.Expanded
+          : vscode.TreeItemCollapsibleState.None;
         return new TaskItem(task, collapsibleState);
       });
     }

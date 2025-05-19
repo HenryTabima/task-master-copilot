@@ -5,12 +5,12 @@ import { ITask } from '../common/Task';
 import { createDatabase, TaskDb } from '../common/Database';
 
 /**
- * Implementation of ITaskProvider using LowDB for persistent storage.
- * Manages tasks for the extension.
+ * Implementation of ITaskProvider using a JSON file for persistent storage.
+ * Manages tasks for the extension, supporting a hierarchical structure.
  */
 export class TaskProvider implements ITaskProvider {
   private db: TaskDb | null = null;
-  private tasks: ITask[] = [];
+  private tasks: ITask[] = []; // Stores top-level tasks; subtasks are in parent's 'children'
   private nextId: number = 1;
   private initialized: boolean = false;
 
@@ -21,21 +21,15 @@ export class TaskProvider implements ITaskProvider {
    */
   public async setDb(db: TaskDb): Promise<void> {
     this.db = db;
-    // Assuming db.read() loads the data
-    // If db.data is not immediately populated after createDatabase,
-    // we might need to explicitly call read here or ensure createDatabase does it.
-    // For now, let's assume createDatabase followed by db.read() in extension.ts is sufficient
-    // and this.db.data will be populated.
     if (this.db && this.db.data) {
+      // Assumes db.data.tasks is already in the hierarchical ITask[] structure
       this.tasks = this.db.data.tasks || [];
       this.nextId = this.db.data.nextId || 1;
       this.initialized = true;
     } else {
-      // Fallback or error if db is not properly set up
-      // This case should ideally be prevented by logic in activate
       this.tasks = [];
       this.nextId = 1;
-      this.initialized = false; // Or throw an error
+      this.initialized = false;
       if (vscode.workspace.getConfiguration().get('copilotTaskMaster.debugMode')) {
         vscode.window.showErrorMessage('TaskProvider: Database not properly configured via setDb.');
       }
@@ -49,19 +43,12 @@ export class TaskProvider implements ITaskProvider {
    */
   public async initialize(context: vscode.ExtensionContext): Promise<void> {
     if (this.initialized && this.db) {
-      // Already initialized with a DB via setDb
       return;
     }
-
-    // This path is now less likely if setDb is called first from activate
-    // However, keeping it as a fallback or for direct instantiation scenarios (e.g. tests not using setDb)
-    // If db is already set, we trust it's been read.
-    // If not, we try to create it.
     if (!this.db) {
       try {
         this.db = await createDatabase(context);
-        // db.read() should have been called by createDatabase or immediately after in activate
-        this.tasks = this.db.data.tasks || [];
+        this.tasks = this.db.data.tasks || []; // Assumes hierarchical structure
         this.nextId = this.db.data.nextId || 1;
         this.initialized = true;
         if (context.extensionMode === vscode.ExtensionMode.Development) {
@@ -77,10 +64,9 @@ export class TaskProvider implements ITaskProvider {
         }
         this.tasks = [];
         this.nextId = 1;
-        this.initialized = true; // Initialized, but with in-memory fallback
+        this.initialized = true; 
       }
     } else if (this.db.data) {
-      // DB was set, ensure data is loaded
       this.tasks = this.db.data.tasks || [];
       this.nextId = this.db.data.nextId || 1;
       this.initialized = true;
@@ -94,7 +80,8 @@ export class TaskProvider implements ITaskProvider {
    * @param nextId The next ID to use for task creation
    */
   public initializeForTesting(tasks: ITask[] = [], nextId: number = 1): void {
-    this.tasks = [...tasks];
+    // Assumes 'tasks' provided are already in the hierarchical ITask structure
+    this.tasks = JSON.parse(JSON.stringify(tasks)); // Deep copy
     this.nextId = nextId;
     this.initialized = true;
   }
@@ -120,63 +107,67 @@ export class TaskProvider implements ITaskProvider {
     if (!this.db) {
       return;
     }
-
     try {
+      // this.tasks already holds the hierarchical structure
       this.db.data.tasks = this.tasks;
       this.db.data.nextId = this.nextId;
       await this.db.write();
-    } catch {
-      // We can't access context here, so just log silently (no user message)
-      // This is ok since database saving should be transparent to the user
-      // and errors would be detected when trying to load
+    } catch (error) {
+        if (vscode.workspace.getConfiguration().get('copilotTaskMaster.debugMode')) {
+            const message = error instanceof Error ? error.message : String(error);
+            vscode.window.showErrorMessage(`TaskProvider: Failed to save to database - ${message}`);
+        }
     }
   }
 
+  // Recursive helper to find a task by ID
+  private findTaskByIdRecursive(tasksToSearch: ITask[], id: string): ITask | undefined {
+    for (const task of tasksToSearch) {
+      if (task.id === id) {
+        return task;
+      }
+      if (task.children && task.children.length > 0) {
+        const foundInChild = this.findTaskByIdRecursive(task.children, id);
+        if (foundInChild) {
+          return foundInChild;
+        }
+      }
+    }
+    return undefined;
+  }
+
   /**
-   * Retrieves tasks.
-   * - If `filter` is undefined, retrieves all tasks.
-   * - If `filter.parentId` is a string, retrieves children of that parent.
-   * - If `filter.parentId` is `null`, retrieves top-level tasks.
-   * @param filter - Optional filter criteria.
-   * @returns A promise that resolves to an array of tasks.
+   * Retrieves all top-level tasks.
+   * To get children of a specific task, retrieve the parent task first and then access its 'children' property.
+   * @returns A promise that resolves to an array of top-level tasks.
    */
-  public async getTasks(filter?: { parentId?: string | null }): Promise<ITask[]> {
+  public async getTasks(): Promise<ITask[]> {
     this.ensureInitialized();
-
-    if (filter === undefined) {
-      return [...this.tasks]; // Return all tasks if no filter is provided
-    }
-
-    const parentId = filter.parentId;
-
-    if (typeof parentId === 'string') {
-      return this.tasks.filter((task) => task.parentId === parentId);
-    } else {
-      // Handles filter.parentId being null (or undefined if filter object was provided without parentId)
-      return this.tasks.filter((task) => !task.parentId);
-    }
+    return JSON.parse(JSON.stringify(this.tasks)); // Return a deep copy of top-level tasks
   }
 
   /**
-   * Retrieves a single task by its ID.
+   * Retrieves a single task by its ID, searching recursively.
    * @param taskId - The ID of the task to retrieve.
    * @returns A promise that resolves to the task, or undefined if not found.
    */
   public async getTask(taskId: string): Promise<ITask | undefined> {
     this.ensureInitialized();
-
-    return this.tasks.find((task) => task.id === taskId);
+    const task = this.findTaskByIdRecursive(this.tasks, taskId);
+    return task ? JSON.parse(JSON.stringify(task)) : undefined; // Return a deep copy
   }
 
   /**
    * Creates a new task.
-   * @param taskData - The data for the new task.
+   * If parentId is provided, the task is created as a subtask. Otherwise, it's a top-level task.
+   * @param taskData - The data for the new task, including an optional parentId.
    * @returns A promise that resolves to the created task.
+   * @throws Error if parentId is provided but the parent task is not found.
    */
   public async createTask(taskData: {
     title: string;
     description?: string;
-    parentId?: string | null;
+    parentId?: string | null; // ID of the parent task
     order?: number;
   }): Promise<ITask> {
     this.ensureInitialized();
@@ -188,92 +179,149 @@ export class TaskProvider implements ITaskProvider {
       completed: false,
       createdAt: new Date(),
       updatedAt: new Date(),
-      parentId: taskData.parentId === undefined ? null : taskData.parentId, // Store undefined as null
       order: taskData.order ?? 0,
+      children: [], // Initialize with an empty children array
     };
-    this.tasks.push(newTask);
+
+    if (taskData.parentId) {
+      const parentTask = this.findTaskByIdRecursive(this.tasks, taskData.parentId);
+      if (parentTask) {
+        parentTask.children.push(newTask);
+      } else {
+        throw new Error(`Parent task with ID ${taskData.parentId} not found.`);
+      }
+    } else {
+      this.tasks.push(newTask);
+    }
+
     await this.saveToDatabase();
-    return newTask;
+    return JSON.parse(JSON.stringify(newTask)); // Return a deep copy
   }
 
   /**
    * Updates an existing task.
    * @param taskId - The ID of the task to update.
    * @param taskUpdate - The partial data to update the task with.
+   *                     Cannot update 'id', 'createdAt', 'updatedAt', or 'children' directly.
    * @returns A promise that resolves to the updated task, or undefined if not found.
    */
   public async updateTask(
     taskId: string,
-    taskUpdate: Partial<Omit<ITask, 'id' | 'createdAt' | 'updatedAt'>>,
+    taskUpdate: Partial<Omit<ITask, 'id' | 'createdAt' | 'updatedAt' | 'children'>>,
   ): Promise<ITask | undefined> {
     this.ensureInitialized();
 
-    const taskIndex = this.tasks.findIndex((task) => task.id === taskId);
-    if (taskIndex === -1) {
+    const task = this.findTaskByIdRecursive(this.tasks, taskId);
+    if (!task) {
       return undefined;
     }
 
-    const updatedTask = {
-      ...this.tasks[taskIndex],
-      ...taskUpdate,
-      updatedAt: new Date(),
-    };
-    this.tasks[taskIndex] = updatedTask;
+    Object.assign(task, taskUpdate, { updatedAt: new Date() });
+    
     await this.saveToDatabase();
-    return updatedTask;
+    return JSON.parse(JSON.stringify(task)); // Return a deep copy
+  }
+
+  // Recursive helper to remove a task by ID from a given list of tasks
+  private removeTaskRecursive(tasksList: ITask[], idToDelete: string): boolean {
+    for (let i = 0; i < tasksList.length; i++) {
+      if (tasksList[i].id === idToDelete) {
+        tasksList.splice(i, 1); // Remove the task
+        return true; // Task found and removed
+      }
+      if (tasksList[i].children && tasksList[i].children.length > 0) {
+        if (this.removeTaskRecursive(tasksList[i].children, idToDelete)) {
+          return true; // Task found and removed in a nested list
+        }
+      }
+    }
+    return false; // Task not found in this list or its children
   }
 
   /**
-   * Deletes a task.
+   * Deletes a task and all its descendants.
    * @param taskId - The ID of the task to delete.
    * @returns A promise that resolves to true if deletion was successful, false otherwise.
    */
   public async deleteTask(taskId: string): Promise<boolean> {
     this.ensureInitialized();
-
-    const taskIndex = this.tasks.findIndex((task) => task.id === taskId);
-    if (taskIndex === -1) {
-      return false;
+    const deleted = this.removeTaskRecursive(this.tasks, taskId);
+    if (deleted) {
+      await this.saveToDatabase();
     }
-
-    // Collect all descendant IDs to delete
-    const idsToDelete = new Set<string>();
-    idsToDelete.add(taskId);
-
-    const findChildrenRecursive = (currentParentId: string) => {
-      const children = this.tasks.filter((task) => task.parentId === currentParentId);
-      for (const child of children) {
-        idsToDelete.add(child.id);
-        findChildrenRecursive(child.id);
+    return deleted;
+  }
+  
+  // Recursive helper to filter out completed tasks
+  // If a parent task is completed, it and its entire subtree are removed.
+  private filterCompletedTasksRecursive(tasksToFilter: ITask[]): ITask[] {
+    const remainingTasks: ITask[] = [];
+    for (const task of tasksToFilter) {
+      if (!task.completed) {
+        // Task is not completed, keep it
+        const filteredChildren = task.children ? this.filterCompletedTasksRecursive(task.children) : [];
+        remainingTasks.push({ ...task, children: filteredChildren });
       }
-    };
-
-    findChildrenRecursive(taskId);
-
-    // Filter out the tasks to be deleted
-    this.tasks = this.tasks.filter((task) => !idsToDelete.has(task.id));
-    await this.saveToDatabase();
-
-    return true;
+      // If task.completed is true, it's excluded, along with all its children.
+    }
+    return remainingTasks;
   }
 
+  // Recursive helper to count tasks marked as completed.
+  private countCompletedTasksRecursive(tasksToCount: ITask[]): number {
+    let count = 0;
+    for (const task of tasksToCount) {
+      if (task.completed) {
+        count++;
+      }
+      // Only count children if the parent itself is not completed but might have completed children
+      // However, our filter logic removes the whole branch if parent is completed.
+      // So, we count completed ones before filtering.
+      if (task.children && task.children.length > 0) {
+         // This will double count if parent and child are both complete,
+         // but we are interested in how many *individual* tasks are complete.
+        count += this.countCompletedTasksRecursive(task.children);
+      }
+    }
+    return count;
+  }
+
+
   /**
-   * Deletes all completed tasks.
-   * @returns A promise that resolves to the number of tasks deleted.
+   * Deletes all tasks that are marked as completed.
+   * If a parent task is completed, it and all its descendants are removed.
+   * @returns A promise that resolves to the number of tasks that were actually marked as completed and then deleted.
    */
   public async deleteCompletedTasks(): Promise<number> {
     this.ensureInitialized();
 
-    const completedTasks = this.tasks.filter((task) => task.completed);
-    const numberOfCompletedTasks = completedTasks.length;
+    // First, count how many tasks are actually marked as completed.
+    // This needs to traverse the tree and sum up all tasks where task.completed is true.
+    const initialCompletedCount = this.countTotalCompletedTasksRecursive(this.tasks);
 
-    if (numberOfCompletedTasks === 0) {
+    if (initialCompletedCount === 0) {
       return 0;
     }
-
-    this.tasks = this.tasks.filter((task) => !task.completed);
+    
+    // Filter out completed tasks. If a parent is completed, it and its children are removed.
+    this.tasks = this.filterCompletedTasksRecursive(this.tasks);
     await this.saveToDatabase();
 
-    return numberOfCompletedTasks;
+    // The number of deleted tasks is the count of those that were 'completed: true'.
+    return initialCompletedCount;
+  }
+
+  // Helper to accurately count tasks that are 'completed: true' throughout the tree.
+  private countTotalCompletedTasksRecursive(tasks: ITask[]): number {
+    let count = 0;
+    for (const task of tasks) {
+        if (task.completed) {
+            count++;
+        }
+        if (task.children && task.children.length > 0) {
+            count += this.countTotalCompletedTasksRecursive(task.children);
+        }
+    }
+    return count;
   }
 }

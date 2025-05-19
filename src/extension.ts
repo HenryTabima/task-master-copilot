@@ -47,14 +47,13 @@ applyTo: '**'
 
 ## Using the TaskTool
 
-When you need to manage tasks, please use the \`TaskTool\`. Here are some general ways you might interact with it:
+When you need to manage tasks, please use the \`TaskTool\`. Tasks (including subtasks) are now primarily added using the 'batch' operation. Here are some general ways you might interact with it:
 
-- To create a new task: "TaskTool, create a task to implement user authentication."
+- To add tasks or subtasks: "TaskTool, batch add a task 'Implement feature X' and a subtask 'Write tests for X'."
 - To list tasks: "TaskTool, show me all incomplete tasks."
 - To mark a task complete: "TaskTool, mark task 'implement user authentication' as complete."
-- To add a subtask: "TaskTool, add a subtask 'write unit tests' to task 'implement user authentication'."
 
-Refer to the capabilities of the \`TaskTool\` for more specific commands and actions.
+Refer to the capabilities of the \`TaskTool\` for more specific commands and actions, especially for using the 'batch' operation to add, toggle, or delete multiple tasks at once.
 `;
 
 /**

@@ -25,7 +25,7 @@ interface IBatchTaskPayload {
  * Interface for the input parameters of the Task Manager tool.
  */
 interface ITaskToolInput {
-  operation: 'list' | 'add' | 'toggleComplete' | 'deleteCompleted' | 'batch';
+  operation: 'list' | 'toggleComplete' | 'deleteCompleted' | 'batch';
   taskId?: string;
   taskTitle?: string;
   taskDescription?: string;
@@ -65,25 +65,6 @@ export class TaskTool implements vscode.LanguageModelTool<ITaskToolInput> {
         title = 'List Tasks';
         message = 'List all current tasks?';
         break;
-      case 'add': {
-        title = input.parentId ? 'Add Subtask' : 'Add Task';
-        if (!input.taskTitle) {
-          throw new vscode.LanguageModelError('Task title is required to add a task.');
-        }
-        // Ensure quotes in titles/descriptions are escaped for the Markdown message
-        const escapedTitle = input.taskTitle.replace(/"/g, '\\"');
-        const escapedDescription = input.taskDescription ? input.taskDescription.replace(/"/g, '\\"') : '';
-        const escapedParentId = input.parentId ? input.parentId.replace(/"/g, '\\"') : '';
-
-        message = `Add a new ${input.parentId ? 'subtask' : 'task'} titled "${escapedTitle}"?`;
-        if (input.taskDescription) {
-          message += ` With description: "${escapedDescription}"`;
-        }
-        if (input.parentId) {
-          message += ` As a subtask of task ID "${escapedParentId}"`;
-        }
-        break;
-      }
       case 'toggleComplete': {
         title = 'Toggle Task Status';
         if (!input.taskId) {
@@ -148,41 +129,23 @@ export class TaskTool implements vscode.LanguageModelTool<ITaskToolInput> {
             throw new vscode.LanguageModelError('Task listing cancelled.');
           }
 
-          const tasks: ITask[] = await this.taskProvider.getTasks();
-          const taskList = tasks
-            .map(
-              (task: ITask) =>
-                `ID: ${task.id}, Title: ${task.title}, Completed: ${task.completed}, Order: ${task.order}`,
-            )
-            .join('\n');
-
-          return new vscode.LanguageModelToolResult([new vscode.LanguageModelTextPart(taskList || 'No tasks found.')]);
-        }
-        case 'add': {
-          if (!input.taskTitle) {
-            throw new vscode.LanguageModelError('Task title is required for the add operation.');
-          }
-          if (token.isCancellationRequested) {
-            throw new vscode.LanguageModelError('Task addition cancelled.');
-          }
-
-          const taskData: Partial<ITask> = {
-            title: input.taskTitle,
-            description: input.taskDescription || '',
+          const tasks: ITask[] = await this.taskProvider.getTasks(); // Returns top-level tasks
+          // Recursive function to flatten the task tree for display
+          const flattenTasks = (taskList: ITask[], level = 0): string[] => {
+            let result: string[] = [];
+            for (const task of taskList) {
+              const prefix = '  '.repeat(level);
+              let taskStr = `${prefix}ID: ${task.id}, Title: ${task.title}, Completed: ${task.completed}, Order: ${task.order}`;
+              result.push(taskStr);
+              if (task.children && task.children.length > 0) {
+                result = result.concat(flattenTasks(task.children, level + 1));
+              }
+            }
+            return result;
           };
-          if (input.parentId) {
-            taskData.parentId = input.parentId;
-          }
+          const taskListString = flattenTasks(tasks).join('\n');
 
-          const newTask = await this.taskProvider.createTask(taskData as Omit<ITask, 'id' | 'completed' | 'order'>);
-
-          if (token.isCancellationRequested) {
-            // Note: TaskProvider already saved it. This cancellation is post-operation.
-            throw new vscode.LanguageModelError('Task addition cancelled, but task was saved.');
-          }
-          return new vscode.LanguageModelToolResult([
-            new vscode.LanguageModelTextPart(`Task added with ID: ${newTask.id}`),
-          ]);
+          return new vscode.LanguageModelToolResult([new vscode.LanguageModelTextPart(taskListString || 'No tasks found.')]);
         }
         case 'toggleComplete': {
           if (!input.taskId) {
@@ -259,16 +222,11 @@ export class TaskTool implements vscode.LanguageModelTool<ITaskToolInput> {
                   if (!op.taskTitle) {
                     throw new Error('Task title is required for add operation in batch.');
                   }
-                  const taskData: Partial<ITask> = {
-                    title: op.taskTitle,
-                    description: op.taskDescription || '',
-                  };
-                  if (op.parentId) {
-                    taskData.parentId = op.parentId;
-                  }
-                  const newTask = await this.taskProvider.createTask(
-                    taskData as Omit<ITask, 'id' | 'completed' | 'order'>,
-                  );
+                  const newTask = await this.taskProvider.createTask({
+                    title: op.taskTitle!,
+                    description: op.taskDescription,
+                    parentId: op.parentId,
+                  });
                   results.push(`Task added with ID: ${newTask.id}`);
                   break;
                 }
@@ -296,8 +254,6 @@ export class TaskTool implements vscode.LanguageModelTool<ITaskToolInput> {
                   if (!op.taskId) {
                     throw new Error('Task ID is required for delete operation in batch.');
                   }
-                  // Assuming taskProvider has a deleteTask method.
-                  // This was confirmed to exist in ITaskProvider during planning.
                   const deleted = await this.taskProvider.deleteTask(op.taskId);
                   if (deleted) {
                     results.push(`Task ${op.taskId} deleted.`);
@@ -307,8 +263,6 @@ export class TaskTool implements vscode.LanguageModelTool<ITaskToolInput> {
                   break;
                 }
                 default:{
-                  // To satisfy the exhaustive check for op.action, explicitly cast to any
-                  // if specific actions are not handled, or add more cases.
                   results.push(`Unknown action: ${(op as any).action}`);
                 }
               }

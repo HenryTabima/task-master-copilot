@@ -20,7 +20,7 @@
       {
         "name": "task_manager_tool",
         "displayName": "Task Manager",
-        "modelDescription": "Manages tasks within VS Code. Allows listing, adding tasks or subtasks, toggling task completion status, and deleting all completed tasks. Available operations: 'list' (shows all tasks), 'add' (creates a new task with a title, optional description, and optional parentId for subtasks), 'toggleComplete' (marks a task as complete or incomplete using its ID), 'deleteCompleted' (deletes all tasks that are marked as complete). Do not use for modifying task details (title, description) or deleting individual tasks yet.",
+        "modelDescription": "Manages tasks within VS Code. Allows listing, toggling task completion status, and deleting all completed tasks. Available operations: 'list' (shows all tasks), 'toggleComplete' (marks a task as complete or incomplete using its ID), 'deleteCompleted' (deletes all tasks that are marked as complete), and 'batch' (allows multiple operations like add, toggleComplete, delete in a single call). Do not use for modifying task details (title, description) or deleting individual tasks yet.",
         "userDescription": "Manage your tasks (list, add, complete, delete completed) directly through Copilot.",
         "canBeReferencedInPrompt": true,
         "toolReferenceName": "manageTasks",
@@ -30,10 +30,9 @@
           "properties": {
             "operation": {
               "type": "string",
-              "description": "The operation to perform: 'list', 'add', 'toggleComplete', or 'deleteCompleted'.",
+              "description": "The operation to perform: 'list', 'toggleComplete', 'deleteCompleted', or 'batch'.",
               "enum": [
                 "list",
-                "add",
                 "toggleComplete",
                 "deleteCompleted",
                 "batch"
@@ -45,11 +44,11 @@
             },
             "taskTitle": {
               "type": "string",
-              "description": "The title of the new task. Required only for the 'add' operation."
+              "description": "The title of the new task. Required only for 'add' action within 'batch' operation."
             },
             "taskDescription": {
               "type": "string",
-              "description": "An optional description for the new task. Used only with the 'add' operation."
+              "description": "An optional description for the new task. Used only with 'add' action within 'batch' operation."
             },
             "parentId": {
               "type": "string",
@@ -125,11 +124,6 @@
         "command": "copilot-task-master.refreshTasksView",
         "title": "Refresh Tasks View",
         "icon": "$(refresh)"
-      },
-      {
-        "command": "copilot-task-master.createTask",
-        "title": "Create Task",
-        "icon": "$(add)"
       },
       {
         "command": "copilot-task-master.markTaskAsComplete",
@@ -249,12 +243,6 @@
         }
       ],
       "view/title": [
-        {
-          "command": "copilot-task-master.createTask",
-          "when": "view == copilot-task-master.tasksView",
-          "group": "navigation",
-          "icon": "$(add)"
-        },
         {
           "command": "copilot-task-master.deleteCompletedTasksFromUI",
           "when": "view == copilot-task-master.tasksView",
