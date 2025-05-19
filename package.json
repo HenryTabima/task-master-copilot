@@ -1,0 +1,254 @@
+{
+  "name": "task-master",
+  "displayName": "task-master",
+  "description": "task manager for github copilot",
+  "version": "0.0.1",
+  "engines": {
+    "vscode": "^1.100.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "activationEvents": [],
+  "main": "./out/extension.js",
+  "contributes": {
+    "languageModelTools": [
+      {
+        "name": "task_manager_tool",
+        "displayName": "Task Manager",
+        "modelDescription": "Manages tasks within VS Code. Allows listing, adding tasks or subtasks, toggling task completion status, and deleting all completed tasks. Available operations: 'list' (shows all tasks), 'add' (creates a new task with a title, optional description, and optional parentId for subtasks), 'toggleComplete' (marks a task as complete or incomplete using its ID), 'deleteCompleted' (deletes all tasks that are marked as complete). Do not use for modifying task details (title, description) or deleting individual tasks yet.",
+        "userDescription": "Manage your tasks (list, add, complete, delete completed) directly through Copilot.",
+        "canBeReferencedInPrompt": true,
+        "toolReferenceName": "manageTasks",
+        "icon": "$(checklist)",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "operation": {
+              "type": "string",
+              "description": "The operation to perform: 'list', 'add', 'toggleComplete', or 'deleteCompleted'.",
+              "enum": [
+                "list",
+                "add",
+                "toggleComplete",
+                "deleteCompleted"
+              ]
+            },
+            "taskId": {
+              "type": "string",
+              "description": "The ID of the task to toggle completion status. Required only for the 'toggleComplete' operation."
+            },
+            "taskTitle": {
+              "type": "string",
+              "description": "The title of the new task. Required only for the 'add' operation."
+            },
+            "taskDescription": {
+              "type": "string",
+              "description": "An optional description for the new task. Used only with the 'add' operation."
+            },
+            "parentId": {
+              "type": "string",
+              "description": "The ID of the parent task if creating a subtask. Optional."
+            },
+            "taskStatus": {
+              "type": "boolean",
+              "description": "The desired completion status (true for complete, false for incomplete). Required for 'toggleComplete' operation if you want to set a specific status, otherwise it will toggle."
+            }
+          },
+          "required": [
+            "operation"
+          ]
+        }
+      }
+    ],
+    "commands": [
+      {
+        "command": "copilot-task-master.helloWorld",
+        "title": "Hello World",
+        "icon": "$(symbol-misc)"
+      },
+      {
+        "command": "copilot-task-master.showTasks",
+        "title": "Show Tasks",
+        "icon": "$(symbol-misc)"
+      },
+      {
+        "command": "copilot-task-master.markTaskAsComplete",
+        "title": "Mark Task as Complete",
+        "icon": "$(check)"
+      },
+      {
+        "command": "copilot-task-master.markTaskAsIncomplete",
+        "title": "Mark Task as Incomplete",
+        "icon": "$(circle-slash)"
+      },
+      {
+        "command": "copilot-task-master.deleteTask",
+        "title": "Delete Task",
+        "icon": "$(trash)"
+      },
+      {
+        "command": "copilot-task-master.editTaskTitle",
+        "title": "Edit Task Title",
+        "icon": "$(edit)"
+      },
+      {
+        "command": "copilot-task-master.editTaskDescription",
+        "title": "Edit Task Description",
+        "icon": "$(pencil)"
+      },
+      {
+        "command": "copilot-task-master.createTask",
+        "title": "Create Task",
+        "icon": "$(add)"
+      },
+      {
+        "command": "fulcrum.createSubTask",
+        "title": "Create Sub-task",
+        "icon": "$(add)"
+      },
+      {
+        "command": "copilot-task-master.deleteCompletedTasksFromUI",
+        "title": "Delete Completed Tasks",
+        "icon": "$(clear-all)"
+      }
+    ],
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "copilot-task-master-sidebar",
+          "title": "Task Master",
+          "icon": "$(checklist)"
+        }
+      ]
+    },
+    "views": {
+      "copilot-task-master-sidebar": [
+        {
+          "id": "copilot-task-master.tasksView",
+          "name": "Tasks",
+          "contextualTitle": "Task Master",
+          "icon": "$(checklist)"
+        }
+      ]
+    },
+    "menus": {
+      "view/item/context": [
+        {
+          "command": "copilot-task-master.markTaskAsComplete",
+          "when": "view == copilot-task-master.tasksView && viewItem == task-incomplete",
+          "group": "1_modification@1"
+        },
+        {
+          "command": "copilot-task-master.markTaskAsIncomplete",
+          "when": "view == copilot-task-master.tasksView && viewItem == task-complete",
+          "group": "1_modification@2"
+        },
+        {
+          "command": "copilot-task-master.editTaskTitle",
+          "when": "view == copilot-task-master.tasksView",
+          "group": "1_modification@3"
+        },
+        {
+          "command": "copilot-task-master.editTaskDescription",
+          "when": "view == copilot-task-master.tasksView",
+          "group": "1_modification@4"
+        },
+        {
+          "command": "copilot-task-master.deleteTask",
+          "when": "view == copilot-task-master.tasksView",
+          "group": "2_destructive@1"
+        },
+        {
+          "command": "copilot-task-master.editTaskTitle",
+          "when": "view == copilot-task-master.tasksView",
+          "group": "inline@1",
+          "icon": "$(edit)"
+        },
+        {
+          "command": "copilot-task-master.markTaskAsComplete",
+          "when": "view == copilot-task-master.tasksView && viewItem == task-incomplete",
+          "group": "inline@2",
+          "icon": "$(check)"
+        },
+        {
+          "command": "copilot-task-master.markTaskAsIncomplete",
+          "when": "view == copilot-task-master.tasksView && viewItem == task-complete",
+          "group": "inline@2",
+          "icon": "$(circle-slash)"
+        },
+        {
+          "command": "copilot-task-master.deleteTask",
+          "when": "view == copilot-task-master.tasksView",
+          "group": "inline@3",
+          "icon": "$(trash)"
+        },
+        {
+          "command": "fulcrum.createSubTask",
+          "when": "view == copilot-task-master.tasksView",
+          "group": "inline@4",
+          "icon": "$(add)"
+        }
+      ],
+      "view/title": [
+        {
+          "command": "copilot-task-master.createTask",
+          "when": "view == copilot-task-master.tasksView",
+          "group": "navigation",
+          "icon": "$(add)"
+        },
+        {
+          "command": "copilot-task-master.deleteCompletedTasksFromUI",
+          "when": "view == copilot-task-master.tasksView",
+          "group": "navigation",
+          "icon": "$(clear-all)"
+        }
+      ]
+    }
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run package",
+    "compile": "npm run check-types && npm run lint && node esbuild.js",
+    "watch": "npm-run-all -p watch:*",
+    "watch:esbuild": "node esbuild.js --watch",
+    "watch:tsc": "tsc --noEmit --watch --project tsconfig.json",
+    "package": "npm run check-types && npm run lint && node esbuild.js --production",
+    "compile-tests": "tsc -p . --outDir out",
+    "watch-tests": "tsc -p . -w --outDir out",
+    "pretest": "npm run compile-tests && npm run compile && npm run lint",
+    "check-types": "tsc --noEmit",
+    "lint": "eslint src",
+    "test": "vscode-test",
+    "test:jest": "jest",
+    "test:jest:watch": "jest --watch"
+  },
+  "devDependencies": {
+    "@eslint/eslintrc": "^3.3.1",
+    "@eslint/js": "^9.26.0",
+    "@types/jest": "^29.5.14",
+    "@types/mocha": "^10.0.10",
+    "@types/node": "20.x",
+    "@types/vscode": "^1.100.0",
+    "@typescript-eslint/eslint-plugin": "^8.32.1",
+    "@typescript-eslint/parser": "^8.32.1",
+    "@vscode/test-cli": "^0.0.10",
+    "@vscode/test-electron": "^2.5.2",
+    "@vscode/vsce": "^3.3.2",
+    "eslint": "^9.26.0",
+    "eslint-config-prettier": "^10.1.5",
+    "eslint-import-resolver-typescript": "^4.3.4",
+    "eslint-plugin-import": "^2.31.0",
+    "eslint-plugin-jest": "^28.11.0",
+    "esbuild": "^0.25.3",
+    "jest": "^29.7.0",
+    "node-gyp": "^11.2.0",
+    "npm-run-all": "^4.1.5",
+    "prettier": "^3.5.3",
+    "ts-jest": "^29.3.2",
+    "typescript": "^5.8.3",
+    "typescript-eslint": "^8.32.1"
+  },
+  "dependencies": {
+    "lowdb": "^7.0.1"
+  }
+}
