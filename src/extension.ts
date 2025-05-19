@@ -77,9 +77,7 @@ async function checkAndPromptForInstructionFile(context: vscode.ExtensionContext
   }
 
   const instructionFileUri = vscode.Uri.joinPath(instructionFileDirUri, INSTRUCTION_FILE_NAME);
-  const predefinedContent = `// filepath: ${instructionFileUri.fsPath}
-// Keywords for Copilot Task Master: TaskTool, Copilot Task Master workflow
----
+  const predefinedContent = `---
 applyTo: '**'
 ---
 ## Planning Process
