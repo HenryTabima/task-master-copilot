@@ -55,6 +55,7 @@ describe('TaskProvider', () => {
     expect(createdTask.title).toBe(newTaskData.title);
     expect(createdTask.description).toBe(newTaskData.description);
     expect(createdTask.completed).toBe(false);
+    expect(createdTask.children).toEqual([]); // Verify children is an empty array
 
     const retrievedTask = await taskProvider.getTask(createdTask.id);
     expect(retrievedTask).toEqual(createdTask);
@@ -72,11 +73,17 @@ describe('TaskProvider', () => {
     mockDb.data.nextId = 1;
     await taskProvider.setDb(mockDb); // Re-initialize with clean mockDb
 
-    await taskProvider.createTask({ title: 'Task 1', description: 'Description 1' });
-    await taskProvider.createTask({ title: 'Task 2', description: 'Description 2' });
+    const task1 = await taskProvider.createTask({ title: 'Task 1', description: 'Description 1' });
+    const task2 = await taskProvider.createTask({ title: 'Task 2', description: 'Description 2' });
+
+    // Create a sub-task for task1 to ensure getTasks only returns top-level tasks
+    await taskProvider.createTask({ title: 'Sub-task for Task 1', parentId: task1.id });
+
 
     const allTasks = await taskProvider.getTasks();
-    expect(allTasks.length).toBe(2);
+    expect(allTasks.length).toBe(2); // Should only return top-level tasks
+    expect(allTasks.find(t => t.id === task1.id)).toBeDefined();
+    expect(allTasks.find(t => t.id === task2.id)).toBeDefined();
   });
 
   it('should update a task', async () => {
@@ -158,20 +165,33 @@ describe('TaskProvider', () => {
       await taskProvider.setDb(mockDb);
     });
 
-    it('should create a sub-task with a parentId', async () => {
+    it('should create a sub-task and correctly nest it', async () => {
       const parentTask = await taskProvider.createTask({ title: 'Parent Task' });
       const subTaskData = { title: 'Sub-task 1', parentId: parentTask.id };
       const createdSubTask = await taskProvider.createTask(subTaskData);
 
       expect(createdSubTask).toBeDefined();
       expect(createdSubTask.title).toBe(subTaskData.title);
-      expect(createdSubTask.parentId).toBe(parentTask.id);
 
+      const retrievedParentTask = await taskProvider.getTask(parentTask.id);
+      expect(retrievedParentTask).toBeDefined();
+      expect(retrievedParentTask?.children).toBeDefined();
+      expect(retrievedParentTask?.children.length).toBe(1);
+      expect(retrievedParentTask?.children[0].id).toBe(createdSubTask.id);
+      expect(retrievedParentTask?.children[0].title).toBe(subTaskData.title);
+
+      // Verify the sub-task itself does not have a parentId property
+      // and its children array is empty as it's a leaf node in this case.
       const retrievedSubTask = await taskProvider.getTask(createdSubTask.id);
-      expect(retrievedSubTask).toEqual(createdSubTask);
+      expect(retrievedSubTask).toEqual(expect.objectContaining({
+        id: createdSubTask.id,
+        title: subTaskData.title,
+        children: [], // Sub-task should have an empty children array
+      }));
+      expect(retrievedSubTask).not.toHaveProperty('parentId');
     });
 
-    it('should retrieve only direct sub-tasks for a given parentId', async () => {
+    it('should retrieve only top-level tasks when calling getTasks without parameters', async () => {
       const parent1 = await taskProvider.createTask({ title: 'Parent 1' });
       await taskProvider.createTask({ title: 'Sub-task P1-1', parentId: parent1.id });
       await taskProvider.createTask({ title: 'Sub-task P1-2', parentId: parent1.id });
@@ -179,28 +199,56 @@ describe('TaskProvider', () => {
       const parent2 = await taskProvider.createTask({ title: 'Parent 2' });
       await taskProvider.createTask({ title: 'Sub-task P2-1', parentId: parent2.id });
 
-      // Create a grandchild, should not be returned as direct child of parent1
-      const subTaskP11 = (await taskProvider.getTasks({ parentId: parent1.id }))[0];
-      await taskProvider.createTask({ title: 'Grandchild P1-1-1', parentId: subTaskP11.id });
+      const topLevelTasks = await taskProvider.getTasks(); // No parentId filter
+      expect(topLevelTasks.length).toBe(2); // parent1 and parent2
+      expect(topLevelTasks.find((t) => t.id === parent1.id)).toBeDefined();
+      expect(topLevelTasks.find((t) => t.id === parent2.id)).toBeDefined();
 
-      const subTasksOfParent1 = await taskProvider.getTasks({ parentId: parent1.id });
-      expect(subTasksOfParent1.length).toBe(2);
-      expect(subTasksOfParent1.every((task) => task.parentId === parent1.id)).toBe(true);
-      expect(subTasksOfParent1.find((t) => t.title === 'Sub-task P1-1')).toBeDefined();
-      expect(subTasksOfParent1.find((t) => t.title === 'Sub-task P1-2')).toBeDefined();
+      // Verify children are nested correctly
+      const retrievedParent1 = topLevelTasks.find((t) => t.id === parent1.id);
+      expect(retrievedParent1?.children.length).toBe(2);
+      expect(retrievedParent1?.children.find(st => st.title === 'Sub-task P1-1')).toBeDefined();
+      expect(retrievedParent1?.children.find(st => st.title === 'Sub-task P1-2')).toBeDefined();
+
+      const retrievedParent2 = topLevelTasks.find((t) => t.id === parent2.id);
+      expect(retrievedParent2?.children.length).toBe(1);
+      expect(retrievedParent2?.children.find(st => st.title === 'Sub-task P2-1')).toBeDefined();
     });
 
-    it('should retrieve only top-level tasks when parentId is null', async () => {
-      const topLevel1 = await taskProvider.createTask({ title: 'Top Level 1' });
-      const parent1 = await taskProvider.createTask({ title: 'Parent 1 with Sub-task' });
-      await taskProvider.createTask({ title: 'Sub-task P1-S1', parentId: parent1.id });
-      const topLevel2 = await taskProvider.createTask({ title: 'Top Level 2' });
+    it('should retrieve children of a task via its children property', async () => {
+      const parent1 = await taskProvider.createTask({ title: 'Parent 1 with Sub-tasks' });
+      const subTask1 = await taskProvider.createTask({ title: 'Sub-task P1-S1', parentId: parent1.id });
+      const subTask2 = await taskProvider.createTask({ title: 'Sub-task P1-S2', parentId: parent1.id });
 
-      const topLevelTasks = await taskProvider.getTasks({ parentId: null });
-      expect(topLevelTasks.length).toBe(3); // Corrected expectation
-      expect(topLevelTasks.find((t) => t.id === topLevel1.id)).toBeDefined();
-      expect(topLevelTasks.find((t) => t.id === topLevel2.id)).toBeDefined();
-      expect(topLevelTasks.find((t) => t.id === parent1.id)).toBeDefined();
+      const retrievedParent = await taskProvider.getTask(parent1.id);
+      expect(retrievedParent).toBeDefined();
+      expect(retrievedParent?.children).toBeDefined();
+      expect(retrievedParent?.children.length).toBe(2);
+      expect(retrievedParent?.children.find(t => t.id === subTask1.id)).toBeDefined();
+      expect(retrievedParent?.children.find(t => t.id === subTask2.id)).toBeDefined();
+    });
+
+
+    // This test needs to be re-evaluated as getTasks({parentId: string}) is no longer the primary way to get children.
+    // Children are accessed via the parent task's 'children' property.
+    it('should correctly manage a hierarchy of tasks (parent, child, grandchild)', async () => {
+      const grandparent = await taskProvider.createTask({ title: 'Grandparent' });
+      const parent = await taskProvider.createTask({ title: 'Parent', parentId: grandparent.id });
+      const child = await taskProvider.createTask({ title: 'Child', parentId: parent.id });
+
+      const retrievedGrandparent = await taskProvider.getTask(grandparent.id);
+      expect(retrievedGrandparent).toBeDefined();
+      expect(retrievedGrandparent?.children.length).toBe(1);
+      expect(retrievedGrandparent?.children[0].id).toBe(parent.id);
+
+      const retrievedParent = retrievedGrandparent?.children[0];
+      expect(retrievedParent).toBeDefined();
+      expect(retrievedParent?.children.length).toBe(1);
+      expect(retrievedParent?.children[0].id).toBe(child.id);
+
+      const retrievedChild = retrievedParent?.children[0];
+      expect(retrievedChild).toBeDefined();
+      expect(retrievedChild?.children.length).toBe(0);
     });
   });
 });
