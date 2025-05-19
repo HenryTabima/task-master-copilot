@@ -5,7 +5,7 @@ import { TaskProvider } from './mcp/TaskProvider';
 import { TaskTreeDataProvider, TaskItem } from './vscode/TaskTreeDataProvider'; // Import TaskTreeDataProvider and TaskItem
 import { TaskTool } from './copilot/TaskTool';
 import { createDatabase, TaskDb } from './common/Database';
-import { TextDecoder, TextEncoder } from 'util'; // Standard Node.js module
+import { TextEncoder } from 'util'; // Standard Node.js module
 import * as path from 'path'; // Import path module
 import * as os from 'os'; // Import os module
 
