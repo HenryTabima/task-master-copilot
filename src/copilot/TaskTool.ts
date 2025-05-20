@@ -6,12 +6,23 @@ import { ITaskProvider } from '../mcp/ITaskProvider';
  * Represents a single operation within a batch request.
  */
 interface ITaskOperation {
-  action: 'add' | 'toggleComplete' | 'delete';
+  action: 'add' | 'toggleComplete' | 'delete' | 'add-subtask';
   taskId?: string;
   taskTitle?: string;
   taskDescription?: string;
+  /**
+   * The ID of the parent task.
+   * Used only with the 'add-subtask' action.
+   * Should NOT be provided for the 'add' action when creating a top-level task.
+   */
   parentId?: string;
   taskStatus?: boolean;
+  /**
+   * An array of child task operations to be processed recursively.
+   * Used only with the 'add' action.
+   * Should NOT be provided for the 'add-subtask' action, as subtasks cannot have their own children defined in the same operation.
+   */
+  childTasks?: ITaskOperation[]; // Re-added childTasks for 'add' operation
 }
 
 /**
@@ -222,12 +233,71 @@ export class TaskTool implements vscode.LanguageModelTool<ITaskToolInput> {
                   if (!op.taskTitle) {
                     throw new Error('Task title is required for add operation in batch.');
                   }
-                  const newTask = await this.taskProvider.createTask({
+                  if (op.parentId) { 
+                    throw new Error('The \'add\' operation cannot have a parentId. Use \'add-subtask\' to create subtasks.');
+                  }
+
+                  const createdTask = await this.taskProvider.createTask({
+                    title: op.taskTitle!,
+                    description: op.taskDescription,
+                  });
+                  results.push(`Task added with ID: ${createdTask.id}`);
+
+                  if (op.childTasks && op.childTasks.length > 0) {
+                    const processChildTasks = async (parentTask: ITask, children: ITaskOperation[]) => {
+                      for (const childOp of children) {
+                        if (childOp.action !== 'add' && childOp.action !== 'add-subtask') {
+                          results.push(`Skipping invalid child action '${childOp.action}' for task '${childOp.taskTitle || childOp.taskId}'. Child tasks for 'add' should be 'add' or 'add-subtask'.`);
+                          continue;
+                        }
+                        if (!childOp.taskTitle) {
+                          results.push(`Error: Child task title is required for parent ID ${parentTask.id}.`);
+                          continue;
+                        }
+
+                        let newChildTask: ITask;
+                        // Regardless of childOp.action ('add' or 'add-subtask'), it becomes a subtask of parentTask here.
+                        // The distinction between 'add' and 'add-subtask' for children primarily affects if *they* can have children in *this specific operation*.
+                        // For simplicity and to align with the parent 'add' not taking parentId, child tasks here are always created under parentTask.
+                        newChildTask = await this.taskProvider.createTask({
+                          title: childOp.taskTitle!,
+                          description: childOp.taskDescription,
+                          parentId: parentTask.id, // Child tasks are created under the parent task.
+                        });
+                        results.push(`Child task added with ID: ${newChildTask.id} under parent ${parentTask.id}`);
+
+                        // Recursive call if the child task itself has childTasks defined (and is an 'add' operation)
+                        // However, current logic for 'add-subtask' prevents childTasks, so this path is mainly for nested 'add' ops.
+                        if (childOp.action === 'add' && childOp.childTasks && childOp.childTasks.length > 0) {
+                           if (childOp.parentId && childOp.parentId !== parentTask.id) {
+                               results.push(`Warning: Child task '${childOp.taskTitle}' specified a different parentId (${childOp.parentId}) than the current parent (${parentTask.id}). It will be created under ${parentTask.id}.`);
+                           }
+                           await processChildTasks(newChildTask, childOp.childTasks);
+                        } else if (childOp.action === 'add-subtask' && childOp.childTasks && childOp.childTasks.length > 0){
+                            results.push(`Warning: 'add-subtask' operation for child '${childOp.taskTitle}' under parent '${parentTask.id}' included childTasks. These will be ignored as 'add-subtask' does not support nested children in the same operation.`);
+                        }
+                      }
+                    };
+                    await processChildTasks(createdTask, op.childTasks);
+                  }
+                  break;
+                }
+                case 'add-subtask': {
+                  if (!op.taskTitle) {
+                    throw new Error('Task title is required for add-subtask operation in batch.');
+                  }
+                  if (!op.parentId) {
+                    throw new Error('Parent ID is required for add-subtask operation in batch.');
+                  }
+                  if (op.childTasks && op.childTasks.length > 0) { 
+                    throw new Error('The \'add-subtask\' operation cannot have childTasks. Create them in separate operations.');
+                  }
+                  const newSubtask = await this.taskProvider.createTask({
                     title: op.taskTitle!,
                     description: op.taskDescription,
                     parentId: op.parentId,
                   });
-                  results.push(`Task added with ID: ${newTask.id}`);
+                  results.push(`Subtask added with ID: ${newSubtask.id} under parent ${op.parentId}`);
                   break;
                 }
                 case 'toggleComplete': {

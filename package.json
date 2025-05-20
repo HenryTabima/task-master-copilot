@@ -20,90 +20,117 @@
   "contributes": {
     "languageModelTools": [
       {
-        "name": "task_manager_tool",
-        "displayName": "Task Manager",
-        "modelDescription": "Manages tasks within VS Code. Allows listing, toggling task completion status, and deleting all completed tasks. Available operations: 'list' (shows all tasks), 'toggleComplete' (marks a task as complete or incomplete using its ID), 'deleteCompleted' (deletes all tasks that are marked as complete), and 'batch' (allows multiple operations like add, toggleComplete, delete in a single call). Do not use for modifying task details (title, description) or deleting individual tasks yet.",
-        "userDescription": "Manage your tasks (list, add, complete, delete completed) directly through Copilot.",
+        "name": "listTasksTool",
+        "displayName": "List Tasks",
+        "modelDescription": "Lists all current tasks. Does not take any input parameters.",
+        "userDescription": "List all your current tasks.",
         "canBeReferencedInPrompt": true,
-        "toolReferenceName": "manageTasks",
+        "toolReferenceName": "listTasks",
+        "icon": "$(list-flat)",
+        "inputSchema": {
+          "type": "object",
+          "properties": {},
+          "required": []
+        }
+      },
+      {
+        "name": "toggleTaskCompleteTool",
+        "displayName": "Toggle Task Complete",
+        "modelDescription": "Toggles the completion status of a task. Requires a taskId. Optionally accepts taskStatus (boolean) to set a specific state (true for complete, false for incomplete); otherwise, it toggles the current state.",
+        "userDescription": "Toggle the completion status of a task by its ID.",
+        "canBeReferencedInPrompt": true,
+        "toolReferenceName": "toggleTask",
+        "icon": "$(check)",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "taskId": {
+              "type": "string",
+              "description": "The ID of the task to toggle completion status."
+            },
+            "taskStatus": {
+              "type": "boolean",
+              "description": "Optional. The desired completion status (true for complete, false for incomplete). If not provided, the status will be toggled."
+            }
+          },
+          "required": [
+            "taskId"
+          ]
+        }
+      },
+      {
+        "name": "deleteCompletedTasksTool",
+        "displayName": "Delete Completed Tasks",
+        "modelDescription": "Deletes all completed tasks. Does not take any input parameters.",
+        "userDescription": "Delete all your completed tasks.",
+        "canBeReferencedInPrompt": true,
+        "toolReferenceName": "deleteCompletedTasks",
+        "icon": "$(trash)",
+        "inputSchema": {
+          "type": "object",
+          "properties": {},
+          "required": []
+        }
+      },
+      {
+        "name": "operationTaskTool",
+        "displayName": "Operation Task Tool",
+        "modelDescription": "Performs batch operations on tasks. Allows adding, adding subtasks, toggling completion, and deleting multiple tasks in a single call.",
+        "userDescription": "Perform multiple task operations at once.",
+        "canBeReferencedInPrompt": true,
+        "toolReferenceName": "operationTasks",
         "icon": "$(checklist)",
         "inputSchema": {
           "type": "object",
           "properties": {
-            "operation": {
-              "type": "string",
-              "description": "The operation to perform: 'list', 'toggleComplete', 'deleteCompleted', or 'batch'.",
-              "enum": [
-                "list",
-                "toggleComplete",
-                "deleteCompleted",
-                "batch"
-              ]
-            },
-            "taskId": {
-              "type": "string",
-              "description": "The ID of the task to toggle completion status. Required only for the 'toggleComplete' operation."
-            },
-            "taskTitle": {
-              "type": "string",
-              "description": "The title of the new task. Required only for 'add' action within 'batch' operation."
-            },
-            "taskDescription": {
-              "type": "string",
-              "description": "An optional description for the new task. Used only with 'add' action within 'batch' operation."
-            },
-            "parentId": {
-              "type": "string",
-              "description": "The ID of the parent task if creating a subtask. Optional."
-            },
-            "taskStatus": {
-              "type": "boolean",
-              "description": "The desired completion status (true for complete, false for incomplete). Required for 'toggleComplete' operation if you want to set a specific status, otherwise it will toggle."
-            },
-            "batchPayload": {
-              "type": "object",
-              "description": "Payload for batch operations.",
-              "properties": {
-                "operations": {
-                  "type": "array",
-                  "items": {
-                    "type": "object",
-                    "properties": {
-                      "action": {
-                        "type": "string",
-                        "enum": [
-                          "add",
-                          "toggleComplete",
-                          "delete"
-                        ],
-                        "description": "The action to perform for this task in the batch."
-                      },
-                      "taskId": {
-                        "type": "string"
-                      },
-                      "taskTitle": {
-                        "type": "string"
-                      },
-                      "taskDescription": {
-                        "type": "string"
-                      },
-                      "taskStatus": {
-                        "type": "boolean"
-                      }
-                    },
-                    "required": [
-                      "action"
+            "operations": {
+              "type": "array",
+              "description": "An array of task operations to perform.",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "action": {
+                    "type": "string",
+                    "description": "The action to perform.",
+                    "enum": [
+                      "add",
+                      "add-subtask",
+                      "toggleComplete",
+                      "delete"
                     ]
+                  },
+                  "taskId": {
+                    "type": "string",
+                    "description": "The ID of the task. Required for 'toggleComplete' and 'delete' actions."
+                  },
+                  "taskTitle": {
+                    "type": "string",
+                    "description": "The title of the task. Required for 'add' and 'add-subtask' actions."
+                  },
+                  "taskDescription": {
+                    "type": "string",
+                    "description": "An optional description for the task. Used with 'add' and 'add-subtask' actions."
+                  },
+                  "parentId": {
+                    "type": "string",
+                    "description": "The ID of the parent task. Required for 'add-subtask' action."
+                  },
+                  "childTasks": {
+                    "type": "array",
+                    "description": "An array of child task operations. Used with 'add' action to create nested tasks. Each item follows this same operation schema.",
+                    "items": {
+                      "$ref": "#/inputSchema/properties/operations/items"
+                    }
                   }
-                }
-              },
-              "required": [
-                "operations"
-              ]
+                },
+                "required": [
+                  "action"
+                ]
+              }
             }
           },
           "required": [
-            "operation"
+            "operations"
           ]
         }
       }
