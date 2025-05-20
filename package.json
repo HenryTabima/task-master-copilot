@@ -3,6 +3,8 @@
   "displayName": "task-master",
   "description": "task manager for github copilot",
   "version": "0.0.1",
+  "icon": "images/icon.png",
+  "license": "MIT",
   "repository": {
     "type": "git",
     "url": "https://github.com/HenryTabima/task-master-copilot.git"
@@ -83,9 +85,6 @@
                         "type": "string"
                       },
                       "taskDescription": {
-                        "type": "string"
-                      },
-                      "parentId": {
                         "type": "string"
                       },
                       "taskStatus": {
