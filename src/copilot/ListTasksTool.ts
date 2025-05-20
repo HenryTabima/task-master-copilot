@@ -1,5 +1,6 @@
 import * as vscode from 'vscode';
 import { ITaskProvider } from '../mcp/ITaskProvider';
+import { ITask } from '../common/Task';
 
 /**
  * Represents a tool that lists all current tasks.
@@ -44,16 +45,9 @@ export class ListTasksTool implements vscode.LanguageModelTool<Record<string, un
         return new vscode.LanguageModelToolResult([new vscode.LanguageModelTextPart('There are no tasks.')]);
       }
 
-      const taskList = tasks.map(task => {
-        let taskString = `ID: ${task.id}, Title: ${task.title}, Status: ${task.completed ? 'Completed' : 'Pending'}`;
-        if (task.description) {
-          taskString += `, Description: ${task.description}`;
-        }
-        // Consider adding child task information if necessary, similar to original TaskTool
-        return taskString;
-      }).join('\n');
+      let taskListString = this.tasksToListString(tasks);
 
-      return new vscode.LanguageModelToolResult([new vscode.LanguageModelTextPart(`Current tasks:\n${taskList}`)]);
+      return new vscode.LanguageModelToolResult([new vscode.LanguageModelTextPart(`Current tasks:\n${taskListString}`)]);
     } catch (error) {
       if (error instanceof vscode.LanguageModelError) {
         throw error;
@@ -61,5 +55,22 @@ export class ListTasksTool implements vscode.LanguageModelTool<Record<string, un
       const message = error instanceof Error ? error.message : String(error);
       throw new vscode.LanguageModelError(`An error occurred while listing tasks: ${message}`);
     }
+  }
+
+  private tasksToListString(tasks: ITask[]): string {
+    return tasks
+      .map(task => {
+        const taskString = this.formatTask(task);
+        if (task.children && task.children.length > 0) {
+          const childrenTaskStrings = task.children.map(childTask => this.formatTask(childTask));
+          return `${taskString}\n  ${childrenTaskStrings.join('\n  ')}`;  
+        }
+      })
+      .join('\n');
+  }
+
+  private formatTask(task: ITask): string {
+    const status = task.completed ? 'Completed' : 'Incomplete';
+    return `- (ID: ${task.id}, Status: ${status}) ${task.title}: ${task.description || 'No description'}`;
   }
 }
