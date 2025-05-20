@@ -3,7 +3,11 @@
 import * as vscode from 'vscode';
 import { TaskProvider } from './mcp/TaskProvider';
 import { TaskTreeDataProvider, TaskItem } from './vscode/TaskTreeDataProvider'; // Import TaskTreeDataProvider and TaskItem
-import { TaskTool } from './copilot/TaskTool';
+// import { TaskTool } from './copilot/TaskTool';
+import { ListTasksTool } from './copilot/ListTasksTool';
+import { ToggleTaskCompleteTool } from './copilot/ToggleTaskCompleteTool';
+import { DeleteCompletedTasksTool } from './copilot/DeleteCompletedTasksTool';
+import { OperationTasksTool } from './copilot/OperationTasksTool';
 import { createDatabase, TaskDb } from './common/Database';
 import { TextEncoder } from 'util'; // Standard Node.js module
 import * as path from 'path'; // Import path module
@@ -12,7 +16,8 @@ import * as os from 'os'; // Import os module
 const INSTRUCTION_FILE_NAME = 'copilot-task-master-workflow.instructions.md';
 // const INSTRUCTION_FILE_RELATIVE_PATH = 'prompts/copilot-task-master-workflow.instructions.md'; // Not strictly needed here if we use INSTRUCTION_FILE_NAME with the dir Uri
 
-const PREDEFINED_INSTRUCTION_CONTENT_TEMPLATE = `---
+const PREDEFINED_INSTRUCTION_CONTENT_TEMPLATE = `
+---
 applyTo: '**'
 ---
 ## Planning Process
@@ -44,17 +49,7 @@ applyTo: '**'
   - STOP
   - If the next task involves code modifications, ask for user confirmation to proceed. For other types of tasks, you may state your intention and proceed.
 - Document all components and functionality developed.
-
-## Using the TaskTool
-
-When you need to manage tasks, please use the \`TaskTool\`. Tasks (including subtasks) are now primarily added using the 'batch' operation. Here are some general ways you might interact with it:
-
-- To add tasks or subtasks: "TaskTool, batch add a task 'Implement feature X' and a subtask 'Write tests for X'."
-- To list tasks: "TaskTool, show me all incomplete tasks."
-- To mark a task complete: "TaskTool, mark task 'implement user authentication' as complete."
-
-Refer to the capabilities of the \`TaskTool\` for more specific commands and actions, especially for using the 'batch' operation to add, toggle, or delete multiple tasks at once.
-`;
+`.trim();
 
 /**
  * Attempts to get the user-level Copilot instructions directory URI.
@@ -187,8 +182,20 @@ export async function activate(context: vscode.ExtensionContext) {
 
   context.subscriptions.push(disposable);
 
-  const taskTool = new TaskTool(taskProvider);
-  context.subscriptions.push(vscode.lm.registerTool(taskTool.name, taskTool));
+  // const taskTool = new TaskTool(taskProvider);
+  // context.subscriptions.push(vscode.lm.registerTool(taskTool.name, taskTool));
+
+  const listTasksTool = new ListTasksTool(taskProvider);
+  context.subscriptions.push(vscode.lm.registerTool(listTasksTool.name, listTasksTool));
+
+  const toggleTaskCompleteTool = new ToggleTaskCompleteTool(taskProvider);
+  context.subscriptions.push(vscode.lm.registerTool(toggleTaskCompleteTool.name, toggleTaskCompleteTool));
+
+  const deleteCompletedTasksTool = new DeleteCompletedTasksTool(taskProvider);
+  context.subscriptions.push(vscode.lm.registerTool(deleteCompletedTasksTool.name, deleteCompletedTasksTool));
+
+  const operationTasksTool = new OperationTasksTool(taskProvider);
+  context.subscriptions.push(vscode.lm.registerTool(operationTasksTool.name, operationTasksTool));
 
   // if (context.extensionMode === vscode.ExtensionMode.Development) {
   //   vscode.window.showInformationMessage('Task Manager Copilot tool registered.');
