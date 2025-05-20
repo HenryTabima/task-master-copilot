@@ -1,6 +1,6 @@
 {
-  "name": "task-master",
-  "displayName": "task-master",
+  "name": "copilot-task-master",
+  "displayName": "Copilot Task Master",
   "description": "task manager for github copilot",
   "version": "0.0.1",
   "icon": "images/icon.png",
