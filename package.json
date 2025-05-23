@@ -189,6 +189,21 @@
         "command": "copilot-task-master.createSubTask",
         "title": "Create Sub-Task",
         "icon": "$(add)"
+      },
+      {
+        "command": "taskmaster.moveTaskUp",
+        "title": "Move Task Up",
+        "icon": "$(arrow-up)"
+      },
+      {
+        "command": "taskmaster.moveTaskDown",
+        "title": "Move Task Down",
+        "icon": "$(arrow-down)"
+      },
+      {
+        "command": "taskmaster.moveTaskToParent",
+        "title": "Move Task to Another Parent",
+        "icon": "$(repo-forked)"
       }
     ],
     "viewsContainers": {
@@ -266,6 +281,21 @@
           "when": "view == copilot-task-master.tasksView",
           "group": "inline@4",
           "icon": "$(add)"
+        },
+        {
+          "command": "taskmaster.moveTaskUp",
+          "when": "view == copilot-task-master.tasksView && viewItem",
+          "group": "3_reorder@1"
+        },
+        {
+          "command": "taskmaster.moveTaskDown",
+          "when": "view == copilot-task-master.tasksView && viewItem",
+          "group": "3_reorder@2"
+        },
+        {
+          "command": "taskmaster.moveTaskToParent",
+          "when": "view == copilot-task-master.tasksView && viewItem",
+          "group": "3_reorder@3"
         }
       ],
       "view/title": [

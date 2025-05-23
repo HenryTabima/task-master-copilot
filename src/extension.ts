@@ -452,6 +452,89 @@ export async function activate(context: vscode.ExtensionContext) {
     }
   });
   context.subscriptions.push(resetInstructionFileCommand);
+
+  // --- Register Task Reordering Commands ---
+
+  const moveTaskUpCommand = vscode.commands.registerCommand(
+    'taskmaster.moveTaskUp',
+    async (taskItem: TaskItem) => {
+      if (!taskItem || !taskItem.task) {
+        vscode.window.showWarningMessage('No task selected to move.');
+        return;
+      }
+      if (taskItem.task.order === undefined || taskItem.task.order === null) {
+        vscode.window.showWarningMessage('Selected task does not have a valid order.');
+        return;
+      }
+      if (taskItem.task.order === 0) {
+        vscode.window.showInformationMessage('Task is already at the top of its list.');
+        return;
+      }
+
+      try {
+        // The parentId is implicitly handled by TaskProvider if it's not changing.
+        // updateTaskOrder is expected to normalize orders after the change.
+        await taskProvider.updateTaskOrder(taskItem.task.id, {
+          order: taskItem.task.order - 1,
+          parentId: taskItem.task.parentId, // Pass current parentId
+        });
+        taskTreeDataProvider.refresh(); // Refresh the view
+      } catch (error) {
+        vscode.window.showErrorMessage(
+          `Failed to move task up: ${error instanceof Error ? error.message : String(error)}`,
+        );
+      }
+    },
+  );
+  context.subscriptions.push(moveTaskUpCommand);
+
+  const moveTaskDownCommand = vscode.commands.registerCommand(
+    'taskmaster.moveTaskDown',
+    async (taskItem: TaskItem) => {
+      if (!taskItem || !taskItem.task) {
+        vscode.window.showWarningMessage('No task selected to move.');
+        return;
+      }
+      if (taskItem.task.order === undefined || taskItem.task.order === null) {
+        vscode.window.showWarningMessage('Selected task does not have a valid order.');
+        return;
+      }
+
+      // To know if it's already at the bottom, we'd need to query its siblings.
+      // For simplicity, we'll let updateTaskOrder handle potential out-of-bounds.
+      // The TaskProvider's _normalizeOrder should cap it at the end of the list if it goes too far.
+      try {
+        await taskProvider.updateTaskOrder(taskItem.task.id, {
+          order: taskItem.task.order + 1,
+          parentId: taskItem.task.parentId, // Pass current parentId
+        });
+        taskTreeDataProvider.refresh(); // Refresh the view
+      } catch (error) {
+        vscode.window.showErrorMessage(
+          `Failed to move task down: ${error instanceof Error ? error.message : String(error)}`,
+        );
+      }
+    },
+  );
+  context.subscriptions.push(moveTaskDownCommand);
+
+  const moveTaskToParentCommand = vscode.commands.registerCommand(
+    'taskmaster.moveTaskToParent',
+    async (taskItem: TaskItem) => {
+      if (!taskItem || !taskItem.task) {
+        vscode.window.showWarningMessage('No task selected to move.');
+        return;
+      }
+      // For now, just a placeholder. Implementation would involve:
+      // 1. Getting all tasks to let the user pick a new parent (or top-level).
+      // 2. Asking for the desired order within the new parent.
+      // 3. Calling taskProvider.updateTaskOrder with the new parentId and order.
+      vscode.window.showInformationMessage(
+        `Move Task to Another Parent (ID: ${taskItem.task.id}) - UI for parent selection not yet implemented.`,
+      );
+    },
+  );
+  context.subscriptions.push(moveTaskToParentCommand);
 }
 
 export function deactivate() {}

@@ -45,4 +45,10 @@ export interface ITask {
    * An array of child tasks.
    */
   children: ITask[];
+
+  /**
+   * The ID of the parent task, if this is a sub-task.
+   * null or undefined if it's a top-level task.
+   */
+  parentId?: string | null;
 }

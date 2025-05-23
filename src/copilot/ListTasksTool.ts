@@ -52,7 +52,8 @@ export class ListTasksTool implements vscode.LanguageModelTool<Record<string, un
       if (error instanceof vscode.LanguageModelError) {
         throw error;
       }
-      const message = error instanceof Error ? error.message : String(error);
+      // Prioritize error.message if available, otherwise stringify the error object
+      const message = (error && typeof (error as any).message === 'string') ? (error as any).message : String(error);
       throw new vscode.LanguageModelError(`An error occurred while listing tasks: ${message}`);
     }
   }
@@ -63,8 +64,9 @@ export class ListTasksTool implements vscode.LanguageModelTool<Record<string, un
         const taskString = this.formatTask(task);
         if (task.children && task.children.length > 0) {
           const childrenTaskStrings = task.children.map(childTask => this.formatTask(childTask));
-          return `${taskString}\n  ${childrenTaskStrings.join('\n  ')}`;  
+          return `${taskString}\n  ${childrenTaskStrings.join('\n  ')}`;
         }
+        return taskString; // Return the task string itself if no children
       })
       .join('\n');
   }

@@ -25,6 +25,7 @@ export class TaskProvider implements ITaskProvider {
       // Assumes db.data.tasks is already in the hierarchical ITask[] structure
       this.tasks = this.db.data.tasks || [];
       this.nextId = this.db.data.nextId || 1;
+      this._sortTasksRecursive(this.tasks); // Sort tasks on load
       this.initialized = true;
     } else {
       this.tasks = [];
@@ -50,6 +51,7 @@ export class TaskProvider implements ITaskProvider {
         this.db = await createDatabase(context);
         this.tasks = this.db.data.tasks || []; // Assumes hierarchical structure
         this.nextId = this.db.data.nextId || 1;
+        this._sortTasksRecursive(this.tasks); // Sort tasks on load
         this.initialized = true;
         if (context.extensionMode === vscode.ExtensionMode.Development) {
           vscode.window.showInformationMessage(
@@ -83,6 +85,7 @@ export class TaskProvider implements ITaskProvider {
     // Assumes 'tasks' provided are already in the hierarchical ITask structure
     this.tasks = JSON.parse(JSON.stringify(tasks)); // Deep copy
     this.nextId = nextId;
+    this._sortTasksRecursive(this.tasks); // Sort tasks on load
     this.initialized = true;
   }
 
@@ -120,6 +123,30 @@ export class TaskProvider implements ITaskProvider {
     }
   }
 
+  // Private helper to sort tasks by order recursively (in place)
+  private _sortTasksRecursive(tasks: ITask[]): void {
+    if (!tasks) { return; }
+    tasks.sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
+    for (const task of tasks) {
+      if (task.children && task.children.length > 0) {
+        this._sortTasksRecursive(task.children);
+      }
+    }
+  }
+
+  // Private helper to get a new array of sorted tasks by order recursively
+  private _getSortedTasksRecursive(tasks: ITask[]): ITask[] {
+    if (!tasks) { return []; }
+    // Create a shallow copy for sorting, then map to deep copy children
+    const sortedTasks = [...tasks].sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
+    return sortedTasks.map(task => ({
+      ...JSON.parse(JSON.stringify(task)), // Deep copy task properties
+      children: task.children && task.children.length > 0
+                  ? this._getSortedTasksRecursive(task.children) // Recursively sort and deep copy children
+                  : [], // Ensure children is an empty array if undefined or empty
+    }));
+  }
+
   // Recursive helper to find a task by ID
   private findTaskByIdRecursive(tasksToSearch: ITask[], id: string): ITask | undefined {
     for (const task of tasksToSearch) {
@@ -143,7 +170,8 @@ export class TaskProvider implements ITaskProvider {
    */
   public async getTasks(): Promise<ITask[]> {
     this.ensureInitialized();
-    return JSON.parse(JSON.stringify(this.tasks)); // Return a deep copy of top-level tasks
+    // Return a deep copy of sorted top-level tasks and their children
+    return JSON.parse(JSON.stringify(this._getSortedTasksRecursive(this.tasks)));
   }
 
   /**
@@ -154,7 +182,12 @@ export class TaskProvider implements ITaskProvider {
   public async getTask(taskId: string): Promise<ITask | undefined> {
     this.ensureInitialized();
     const task = this.findTaskByIdRecursive(this.tasks, taskId);
-    return task ? JSON.parse(JSON.stringify(task)) : undefined; // Return a deep copy
+    if (task) {
+      const deepCopiedTask = JSON.parse(JSON.stringify(task));
+      this._ensureDateObjects(deepCopiedTask);
+      return deepCopiedTask;
+    }
+    return undefined;
   }
 
   /**
@@ -186,16 +219,21 @@ export class TaskProvider implements ITaskProvider {
     if (taskData.parentId) {
       const parentTask = this.findTaskByIdRecursive(this.tasks, taskData.parentId);
       if (parentTask) {
+        if (!parentTask.children) { parentTask.children = []; } // Ensure children array exists
         parentTask.children.push(newTask);
+        this._sortTasksRecursive(parentTask.children); // Sort children after adding
       } else {
         throw new Error(`Parent task with ID ${taskData.parentId} not found.`);
       }
     } else {
       this.tasks.push(newTask);
+      this._sortTasksRecursive(this.tasks); // Sort top-level tasks after adding
     }
 
     await this.saveToDatabase();
-    return JSON.parse(JSON.stringify(newTask)); // Return a deep copy
+    const deepCopiedNewTask = JSON.parse(JSON.stringify(newTask));
+    this._ensureDateObjects(deepCopiedNewTask);
+    return deepCopiedNewTask;
   }
 
   /**
@@ -219,7 +257,9 @@ export class TaskProvider implements ITaskProvider {
     Object.assign(task, taskUpdate, { updatedAt: new Date() });
     
     await this.saveToDatabase();
-    return JSON.parse(JSON.stringify(task)); // Return a deep copy
+    const deepCopiedUpdatedTask = JSON.parse(JSON.stringify(task));
+    this._ensureDateObjects(deepCopiedUpdatedTask);
+    return deepCopiedUpdatedTask;
   }
 
   // Recursive helper to remove a task by ID from a given list of tasks
@@ -323,5 +363,155 @@ export class TaskProvider implements ITaskProvider {
         }
     }
     return count;
+  }
+
+  // Helper function to re-assign order sequentially
+  private _normalizeOrder(tasks: ITask[]): void {
+    if (!tasks) { return; }
+    tasks.forEach((task, index) => {
+      task.order = index;
+    });
+  }
+
+  /**
+   * Updates the order of a task, potentially moving it under a new parent.
+   * @param taskId The ID of the task to move.
+   * @param newOrderValues Object containing the new 'order' and optional 'parentId'.
+   *                     'parentId' can be null to move to top-level.
+   * @returns A promise that resolves to the updated task, or undefined if not found.
+   */
+  public async updateTaskOrder(
+    taskId: string,
+    newOrderValues: { order: number; parentId?: string | null },
+  ): Promise<ITask | undefined> {
+    this.ensureInitialized();
+
+    let taskToMove: ITask | undefined;
+    let originalParentChildrenList: ITask[] = this.tasks; // Default to top-level tasks
+    // let isOriginallyTopLevel = true; // This variable was unused
+
+    // Find the task and its original parent's children array
+    // First, check top-level tasks
+    const topLevelIndex = this.tasks.findIndex(t => t.id === taskId);
+    if (topLevelIndex !== -1) {
+      taskToMove = this.tasks[topLevelIndex];
+    } else {
+      // Search in children
+      const findInChildren = (
+        parentTask: ITask,
+      ): { task?: ITask; parentList: ITask[] } | undefined => {
+        if (!parentTask.children) { return undefined; }
+        const childIndex = parentTask.children.findIndex(t => t.id === taskId);
+        if (childIndex !== -1) {
+          return { task: parentTask.children[childIndex], parentList: parentTask.children };
+        }
+        for (const child of parentTask.children) {
+          const found = findInChildren(child);
+          if (found) { return found; }
+        }
+        return undefined;
+      };
+
+      for (const task of this.tasks) {
+        const foundResult = findInChildren(task);
+        if (foundResult) {
+          taskToMove = foundResult.task;
+          originalParentChildrenList = foundResult.parentList;
+          // isOriginallyTopLevel = false; // This variable was unused
+          break;
+        }
+      }
+    }
+
+    if (!taskToMove) {
+      if (vscode.workspace.getConfiguration().get('copilotTaskMaster.debugMode')) {
+        vscode.window.showWarningMessage(`TaskProvider: Task with ID ${taskId} not found for reordering.`);
+      }
+      return undefined; // Task not found
+    }
+
+    // Remove from old location
+    const originalIndex = originalParentChildrenList.findIndex(t => t.id === taskId);
+    if (originalIndex > -1) {
+      originalParentChildrenList.splice(originalIndex, 1);
+    }
+    // No need to normalize/sort originalParentChildrenList yet, will do it after placing the task
+
+    // Update task properties
+    taskToMove.order = newOrderValues.order;
+    // taskToMove.parentId will be implicitly set by where we place it.
+    // If newOrderValues.parentId is explicitly different, that's the target.
+    // If newOrderValues.parentId is undefined, it implies order change within the same parent.
+    // If newOrderValues.parentId is null, it implies move to top level.
+    taskToMove.updatedAt = new Date();
+
+    let newParentChildrenList: ITask[] = this.tasks; // Default to top-level
+
+    if (newOrderValues.parentId === null || newOrderValues.parentId === undefined) {
+      // Move to top-level
+      // newParentChildrenList is already this.tasks
+    } else {
+      // Move to a specific parent
+      const newParentTask = this.findTaskByIdRecursive(this.tasks, newOrderValues.parentId);
+      if (newParentTask) {
+        if (!newParentTask.children) {
+          newParentTask.children = [];
+        }
+        newParentChildrenList = newParentTask.children;
+      } else {
+        if (vscode.workspace.getConfiguration().get('copilotTaskMaster.debugMode')) {
+          vscode.window.showWarningMessage(
+            `TaskProvider: New parent task with ID ${newOrderValues.parentId} not found. Moving task ${taskId} to top level as fallback.`,
+          );
+        }
+        // Fallback to top-level if new parent not found
+        // newParentChildrenList is already this.tasks
+      }
+    }
+
+    // Add to new location - respect the target order
+    // Ensure the order is within bounds
+    const targetOrder = Math.max(0, Math.min(newOrderValues.order, newParentChildrenList.length));
+    newParentChildrenList.splice(targetOrder, 0, taskToMove);
+
+    // Normalize order for both lists (if they are different)
+    this._normalizeOrder(newParentChildrenList);
+    if (originalParentChildrenList !== newParentChildrenList) {
+      this._normalizeOrder(originalParentChildrenList);
+    }
+
+    // Sort both lists (they are already normalized, but sorting ensures consistency if order was sparse)
+    // _sortTasksRecursive sorts in place based on 'order' which _normalizeOrder just set.
+    this._sortTasksRecursive(newParentChildrenList);
+    if (originalParentChildrenList !== newParentChildrenList) {
+      this._sortTasksRecursive(originalParentChildrenList);
+    }
+    
+    // If the task was moved between top-level and a child list, or between different child lists,
+    // ensure the main tasks list is also sorted if it was the source or destination.
+    // This should be covered by the sorts above if newParentChildrenList or originalParentChildrenList is this.tasks.
+
+    await this.saveToDatabase();
+    const deepCopiedMovedTask = JSON.parse(JSON.stringify(taskToMove));
+    this._ensureDateObjects(deepCopiedMovedTask);
+    return deepCopiedMovedTask;
+  }
+
+  // Helper function to recursively convert date strings to Date objects
+  private _ensureDateObjects(task: ITask | undefined | null): void {
+    if (!task) return;
+
+    if (typeof task.createdAt === 'string') {
+      task.createdAt = new Date(task.createdAt);
+    }
+    if (typeof task.updatedAt === 'string') {
+      task.updatedAt = new Date(task.updatedAt);
+    }
+
+    if (task.children && task.children.length > 0) {
+      for (const child of task.children) {
+        this._ensureDateObjects(child);
+      }
+    }
   }
 }

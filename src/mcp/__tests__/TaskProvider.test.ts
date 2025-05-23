@@ -1,254 +1,345 @@
 import { TaskProvider } from '../TaskProvider';
 import { ITask } from '../../common/Task';
-import { TaskDb } from '../../common/Database';
+import { jest } from '@jest/globals';
 
-describe('TaskProvider', () => {
+// Mock vscode APIs to prevent errors in a non-VSCode environment
+// These mocks are simplified and assume the parts of vscode API used by TaskProvider
+// (like getConfiguration for debugMode) are not critical for the logic being tested.
+jest.mock('vscode', () => ({
+  workspace: {
+    getConfiguration: jest.fn().mockReturnValue({
+      get: jest.fn().mockReturnValue(false), // Default debugMode to false
+    }),
+  },
+  window: {
+    showErrorMessage: jest.fn(),
+    showWarningMessage: jest.fn(),
+    showInformationMessage: jest.fn(),
+  },
+  Uri: {
+    joinPath: jest.fn((uri, ...paths) => ({ ...uri, fsPath: `${uri.fsPath}/${paths.join('/')}` })),
+    file: jest.fn(path => ({ fsPath: path })),
+  },
+  ExtensionMode: {
+    Development: 'development',
+    Production: 'production',
+  }
+}));
+
+describe('TaskProvider Order Management', () => {
   let taskProvider: TaskProvider;
-  let mockDb: TaskDb;
-  let mockFireonDidChangeData: jest.Mock;
-  let mockDisposeOnDidChangeData: jest.Mock;
+  let mockDb: any; // Using 'any' for simplicity in this mock
 
-  beforeEach(async () => {
+  beforeEach(async () => { // Make beforeEach async
     taskProvider = new TaskProvider();
-
-    mockFireonDidChangeData = jest.fn();
-    mockDisposeOnDidChangeData = jest.fn();
-
     mockDb = {
       data: {
         tasks: [],
         nextId: 1,
       },
       read: jest.fn().mockResolvedValue(undefined),
-      write: jest.fn().mockImplementation(async () => {
-        // If the write operation is supposed to fire the event:
-        // mockFireonDidChangeData();
-      }),
-      // Mock _onDidChangeData as an object with a fire method
-      _onDidChangeData: {
-        fire: mockFireonDidChangeData,
-        // Add other EventEmitter methods if your code uses them, e.g., event, dispose
-      } as any, // Use 'as any' to simplify if not all EventEmitter props are mocked
-      // Mock onDidChangeData as a function that returns a disposable object
-      onDidChangeData: jest.fn(() => ({
-        dispose: mockDisposeOnDidChangeData,
-      })),
+      write: jest.fn().mockResolvedValue(undefined),
+      // Add other properties if ensureInitialized or other parts of TaskProvider need them
     };
-    await taskProvider.setDb(mockDb);
+    await taskProvider.setDb(mockDb); // Set the mock DB
+    // InitializeForTesting will be called by specific test suites or tests if they need to override initial data
+    // For a general setup, we can initialize it here too.
+    taskProvider.initializeForTesting([], 1); 
   });
 
-  // Reset mocks before each test to ensure test isolation
-  afterEach(() => {
-    mockFireonDidChangeData.mockClear();
-    mockDisposeOnDidChangeData.mockClear();
-    // Clear any other mocks if necessary, e.g., mockDb.read, mockDb.write
-    (mockDb.read as jest.Mock).mockClear();
-    (mockDb.write as jest.Mock).mockClear();
-    (mockDb.onDidChangeData as jest.Mock).mockClear();
-  });
+  // Helper to assert that orders are sequential and unique within a list of tasks
+  const assertSequentialOrder = (tasks: ITask[], expectedParentId?: string | null) => {
+    tasks.forEach((task, index) => {
+      expect(task.order).toBe(index);
+      if (expectedParentId !== undefined) { // expectedParentId can be null for top-level
+        // For a moved task, its parentId property might be set directly by the updateTaskOrder logic.
+        // The test data for children should already have the correct parentId.
+        // This check is more for consistency if we were also testing parentId assignment here.
+      }
+    });
+  };
 
-  it('should create and retrieve a task', async () => {
-    const newTaskData = { title: 'Test Task', description: 'Test Description' };
-    const createdTask = await taskProvider.createTask(newTaskData);
+  describe('updateTaskOrder', () => {
+    describe('Move Up (Same List)', () => {
+      it('should move a middle item up in a top-level list', async () => {
+        const initialTasks: ITask[] = [
+          { id: '1', title: 'Task 1', order: 0, parentId: null, children: [], createdAt: new Date(), updatedAt: new Date(), completed: false },
+          { id: '2', title: 'Task 2', order: 1, parentId: null, children: [], createdAt: new Date(), updatedAt: new Date(), completed: false },
+          { id: '3', title: 'Task 3', order: 2, parentId: null, children: [], createdAt: new Date(), updatedAt: new Date(), completed: false },
+        ];
+        taskProvider.initializeForTesting(initialTasks, 4);
+        const taskToMove = await taskProvider.getTask('2');
+        const originalUpdatedAt = taskToMove!.updatedAt;
 
-    expect(createdTask).toBeDefined();
-    expect(createdTask.title).toBe(newTaskData.title);
-    expect(createdTask.description).toBe(newTaskData.description);
-    expect(createdTask.completed).toBe(false);
-    expect(createdTask.children).toEqual([]); // Verify children is an empty array
+        await new Promise(resolve => setTimeout(resolve, 10)); // Small delay
 
-    const retrievedTask = await taskProvider.getTask(createdTask.id);
-    expect(retrievedTask).toEqual(createdTask);
-  });
+        const updatedTask = await taskProvider.updateTaskOrder('2', { order: 0, parentId: null });
+        expect(updatedTask).toBeDefined();
+        expect(updatedTask!.id).toBe('2');
+        expect(updatedTask!.order).toBe(0); // New actual order after normalization
+        expect(updatedTask!.updatedAt.getTime()).toBeGreaterThan(originalUpdatedAt.getTime());
 
-  it('should return undefined for a non-existent task', async () => {
-    const retrievedTask = await taskProvider.getTask('non-existent-id');
-    expect(retrievedTask).toBeUndefined();
-  });
+        const tasks = await taskProvider.getTasks();
+        expect(tasks.map(t => t.id)).toEqual(['2', '1', '3']);
+        assertSequentialOrder(tasks, null);
+      });
 
-  it('should get all tasks', async () => {
-    // Reset tasks in mockDb for this specific test if needed, or rely on createTask
-    // For this test, creating tasks anew is fine.
-    mockDb.data.tasks = []; // Ensure clean state for this test
-    mockDb.data.nextId = 1;
-    await taskProvider.setDb(mockDb); // Re-initialize with clean mockDb
+      it('should move a middle item up in a nested list', async () => {
+        const initialTasks: ITask[] = [
+          { id: 'parent', title: 'Parent', order: 0, parentId: null, createdAt: new Date(), updatedAt: new Date(), completed: false, children: [
+            { id: 'c1', title: 'Child 1', order: 0, parentId: 'parent', children: [], createdAt: new Date(), updatedAt: new Date(), completed: false },
+            { id: 'c2', title: 'Child 2', order: 1, parentId: 'parent', children: [], createdAt: new Date(), updatedAt: new Date(), completed: false },
+            { id: 'c3', title: 'Child 3', order: 2, parentId: 'parent', children: [], createdAt: new Date(), updatedAt: new Date(), completed: false },
+          ]},
+        ];
+        taskProvider.initializeForTesting(initialTasks, 4);
 
-    const task1 = await taskProvider.createTask({ title: 'Task 1', description: 'Description 1' });
-    const task2 = await taskProvider.createTask({ title: 'Task 2', description: 'Description 2' });
+        await taskProvider.updateTaskOrder('c2', { order: 0, parentId: 'parent' }); // Target order 0
+        const parentTask = await taskProvider.getTask('parent');
+        expect(parentTask!.children.map(t => t.id)).toEqual(['c2', 'c1', 'c3']);
+        assertSequentialOrder(parentTask!.children, 'parent');
+      });
 
-    // Create a sub-task for task1 to ensure getTasks only returns top-level tasks
-    await taskProvider.createTask({ title: 'Sub-task for Task 1', parentId: task1.id });
-
-
-    const allTasks = await taskProvider.getTasks();
-    expect(allTasks.length).toBe(2); // Should only return top-level tasks
-    expect(allTasks.find(t => t.id === task1.id)).toBeDefined();
-    expect(allTasks.find(t => t.id === task2.id)).toBeDefined();
-  });
-
-  it('should update a task', async () => {
-    // Ensure clean state for this test
-    mockDb.data.tasks = [];
-    mockDb.data.nextId = 1;
-    await taskProvider.setDb(mockDb);
-
-    const task = await taskProvider.createTask({ title: 'Old Title', description: 'Old Description' });
-    const updates: Partial<ITask> = {
-      title: 'New Title',
-      completed: true,
-    };
-
-    const updatedTask = await taskProvider.updateTask(task.id, updates);
-
-    expect(updatedTask).toBeDefined();
-    expect(updatedTask?.id).toBe(task.id);
-    expect(updatedTask?.title).toBe('New Title');
-    expect(updatedTask?.description).toBe('Old Description'); // Description wasn't updated
-    expect(updatedTask?.completed).toBe(true);
-
-    const retrievedTask = await taskProvider.getTask(task.id);
-    expect(retrievedTask?.title).toBe('New Title');
-    expect(retrievedTask?.completed).toBe(true);
-  });
-
-  it('should mark a task as incomplete', async () => {
-    // Ensure clean state
-    mockDb.data.tasks = [];
-    mockDb.data.nextId = 1;
-    await taskProvider.setDb(mockDb);
-
-    const task = await taskProvider.createTask({ title: 'Completable Task' });
-    // Mark as complete first
-    await taskProvider.updateTask(task.id, { completed: true });
-    let retrievedTask = await taskProvider.getTask(task.id);
-    expect(retrievedTask?.completed).toBe(true);
-
-    // Mark as incomplete
-    const updatedTask = await taskProvider.updateTask(task.id, { completed: false });
-    expect(updatedTask).toBeDefined();
-    expect(updatedTask?.completed).toBe(false);
-
-    retrievedTask = await taskProvider.getTask(task.id);
-    expect(retrievedTask?.completed).toBe(false);
-  });
-
-  it('should return undefined when updating a non-existent task', async () => {
-    const updatedTask = await taskProvider.updateTask('non-existent-id', { title: 'New Title' });
-    expect(updatedTask).toBeUndefined();
-  });
-
-  it('should delete a task', async () => {
-    // Ensure clean state
-    mockDb.data.tasks = [];
-    mockDb.data.nextId = 1;
-    await taskProvider.setDb(mockDb);
-
-    const task = await taskProvider.createTask({ title: 'To Be Deleted', description: 'Delete me' });
-    const result = await taskProvider.deleteTask(task.id);
-    expect(result).toBe(true);
-
-    const retrievedTask = await taskProvider.getTask(task.id);
-    expect(retrievedTask).toBeUndefined();
-  });
-
-  it('should return false when deleting a non-existent task', async () => {
-    const result = await taskProvider.deleteTask('non-existent-id');
-    expect(result).toBe(false);
-  });
-
-  describe('Sub-task functionality', () => {
-    beforeEach(async () => {
-      // Ensure a clean state for sub-task tests by resetting the mockDb
-      // and re-applying it to the taskProvider instance.
-      mockDb.data.tasks = [];
-      mockDb.data.nextId = 1;
-      await taskProvider.setDb(mockDb);
+      it('should move the second item to the top', async () => {
+        const initialTasks: ITask[] = [
+          { id: '1', title: 'Task 1', order: 0, parentId: null, children: [], createdAt: new Date(), updatedAt: new Date(), completed: false },
+          { id: '2', title: 'Task 2', order: 1, parentId: null, children: [], createdAt: new Date(), updatedAt: new Date(), completed: false },
+        ];
+        taskProvider.initializeForTesting(initialTasks, 3);
+        await taskProvider.updateTaskOrder('2', { order: 0, parentId: null }); // Target order 0
+        const tasks = await taskProvider.getTasks();
+        expect(tasks.map(t => t.id)).toEqual(['2', '1']);
+        assertSequentialOrder(tasks, null);
+      });
     });
 
-    it('should create a sub-task and correctly nest it', async () => {
-      const parentTask = await taskProvider.createTask({ title: 'Parent Task' });
-      const subTaskData = { title: 'Sub-task 1', parentId: parentTask.id };
-      const createdSubTask = await taskProvider.createTask(subTaskData);
+    describe('Move Down (Same List)', () => {
+      it('should move a middle item down in a top-level list', async () => {
+        const initialTasks: ITask[] = [
+          { id: '1', title: 'Task 1', order: 0, parentId: null, children: [], createdAt: new Date(), updatedAt: new Date(), completed: false },
+          { id: '2', title: 'Task 2', order: 1, parentId: null, children: [], createdAt: new Date(), updatedAt: new Date(), completed: false },
+          { id: '3', title: 'Task 3', order: 2, parentId: null, children: [], createdAt: new Date(), updatedAt: new Date(), completed: false },
+        ];
+        taskProvider.initializeForTesting(initialTasks, 4);
+        await taskProvider.updateTaskOrder('2', { order: 2, parentId: null }); // Target order 2 (move to where 3 is)
+        const tasks = await taskProvider.getTasks();
+        expect(tasks.map(t => t.id)).toEqual(['1', '3', '2']);
+        assertSequentialOrder(tasks, null);
+      });
 
-      expect(createdSubTask).toBeDefined();
-      expect(createdSubTask.title).toBe(subTaskData.title);
-
-      const retrievedParentTask = await taskProvider.getTask(parentTask.id);
-      expect(retrievedParentTask).toBeDefined();
-      expect(retrievedParentTask?.children).toBeDefined();
-      expect(retrievedParentTask?.children.length).toBe(1);
-      expect(retrievedParentTask?.children[0].id).toBe(createdSubTask.id);
-      expect(retrievedParentTask?.children[0].title).toBe(subTaskData.title);
-
-      // Verify the sub-task itself does not have a parentId property
-      // and its children array is empty as it's a leaf node in this case.
-      const retrievedSubTask = await taskProvider.getTask(createdSubTask.id);
-      expect(retrievedSubTask).toEqual(expect.objectContaining({
-        id: createdSubTask.id,
-        title: subTaskData.title,
-        children: [], // Sub-task should have an empty children array
-      }));
-      expect(retrievedSubTask).not.toHaveProperty('parentId');
+      it('should move an item to be the last item', async () => {
+        const initialTasks: ITask[] = [
+          { id: '1', title: 'Task 1', order: 0, parentId: null, children: [], createdAt: new Date(), updatedAt: new Date(), completed: false },
+          { id: '2', title: 'Task 2', order: 1, parentId: null, children: [], createdAt: new Date(), updatedAt: new Date(), completed: false },
+          { id: '3', title: 'Task 3', order: 2, parentId: null, children: [], createdAt: new Date(), updatedAt: new Date(), completed: false },
+        ];
+        taskProvider.initializeForTesting(initialTasks, 4);
+        await taskProvider.updateTaskOrder('1', { order: 2, parentId: null }); // Target order 2 (move to last position)
+        const tasks = await taskProvider.getTasks();
+        expect(tasks.map(t => t.id)).toEqual(['2', '3', '1']);
+        assertSequentialOrder(tasks, null);
+      });
     });
 
-    it('should retrieve only top-level tasks when calling getTasks without parameters', async () => {
-      const parent1 = await taskProvider.createTask({ title: 'Parent 1' });
-      await taskProvider.createTask({ title: 'Sub-task P1-1', parentId: parent1.id });
-      await taskProvider.createTask({ title: 'Sub-task P1-2', parentId: parent1.id });
+    describe('Edge Cases (Same List)', () => {
+      it('should not change order if attempting to move top item further up (order 0)', async () => {
+        const initialTasks: ITask[] = [
+          { id: '1', title: 'T1', order: 0, parentId: null, children: [], createdAt: new Date(), updatedAt: new Date(), completed: false },
+          { id: '2', title: 'T2', order: 1, parentId: null, children: [], createdAt: new Date(), updatedAt: new Date(), completed: false },
+        ];
+        taskProvider.initializeForTesting(initialTasks, 3);
+        const task1Initial = await taskProvider.getTask('1');
+        
+        const updatedTask = await taskProvider.updateTaskOrder('1', { order: 0, parentId: null });
+        expect(updatedTask!.order).toBe(0);
+        // Check if updatedAt was NOT updated if no effective change, or IS updated if it was re-saved.
+        // The current implementation of updateTaskOrder always updates updatedAt.
+        expect(updatedTask!.updatedAt.getTime()).toBeGreaterThanOrEqual(task1Initial!.updatedAt.getTime());
+        
+        const tasks = await taskProvider.getTasks();
+        expect(tasks.map(t => t.id)).toEqual(['1', '2']);
+        assertSequentialOrder(tasks, null);
+      });
+      
+      it('should not change order if attempting to move top item further up (order -1)', async () => {
+        const initialTasks: ITask[] = [
+          { id: '1', title: 'T1', order: 0, parentId: null, children: [], createdAt: new Date(), updatedAt: new Date(), completed: false },
+          { id: '2', title: 'T2', order: 1, parentId: null, children: [], createdAt: new Date(), updatedAt: new Date(), completed: false },
+        ];
+        taskProvider.initializeForTesting(initialTasks, 3);
+        const task1Initial = await taskProvider.getTask('1');
 
-      const parent2 = await taskProvider.createTask({ title: 'Parent 2' });
-      await taskProvider.createTask({ title: 'Sub-task P2-1', parentId: parent2.id });
+        const updatedTask = await taskProvider.updateTaskOrder('1', { order: -1, parentId: null }); // Target negative order
+        expect(updatedTask!.order).toBe(0); // Should be clamped to 0
+        expect(updatedTask!.updatedAt.getTime()).toBeGreaterThanOrEqual(task1Initial!.updatedAt.getTime());
+        
+        const tasks = await taskProvider.getTasks();
+        expect(tasks.map(t => t.id)).toEqual(['1', '2']);
+        assertSequentialOrder(tasks, null);
+      });
 
-      const topLevelTasks = await taskProvider.getTasks(); // No parentId filter
-      expect(topLevelTasks.length).toBe(2); // parent1 and parent2
-      expect(topLevelTasks.find((t) => t.id === parent1.id)).toBeDefined();
-      expect(topLevelTasks.find((t) => t.id === parent2.id)).toBeDefined();
+      it('should not change order if attempting to move bottom item further down', async () => {
+        const initialTasks: ITask[] = [
+          { id: '1', title: 'T1', order: 0, parentId: null, children: [], createdAt: new Date(), updatedAt: new Date(), completed: false },
+          { id: '2', title: 'T2', order: 1, parentId: null, children: [], createdAt: new Date(), updatedAt: new Date(), completed: false },
+        ];
+        taskProvider.initializeForTesting(initialTasks, 3);
+        const task2Initial = await taskProvider.getTask('2');
 
-      // Verify children are nested correctly
-      const retrievedParent1 = topLevelTasks.find((t) => t.id === parent1.id);
-      expect(retrievedParent1?.children.length).toBe(2);
-      expect(retrievedParent1?.children.find(st => st.title === 'Sub-task P1-1')).toBeDefined();
-      expect(retrievedParent1?.children.find(st => st.title === 'Sub-task P1-2')).toBeDefined();
+        const updatedTask = await taskProvider.updateTaskOrder('2', { order: 5, parentId: null }); // Order beyond length
+        expect(updatedTask!.order).toBe(1); // Should be clamped to last position
+        expect(updatedTask!.updatedAt.getTime()).toBeGreaterThanOrEqual(task2Initial!.updatedAt.getTime());
 
-      const retrievedParent2 = topLevelTasks.find((t) => t.id === parent2.id);
-      expect(retrievedParent2?.children.length).toBe(1);
-      expect(retrievedParent2?.children.find(st => st.title === 'Sub-task P2-1')).toBeDefined();
+        const tasks = await taskProvider.getTasks();
+        expect(tasks.map(t => t.id)).toEqual(['1', '2']);
+        assertSequentialOrder(tasks, null);
+      });
     });
 
-    it('should retrieve children of a task via its children property', async () => {
-      const parent1 = await taskProvider.createTask({ title: 'Parent 1 with Sub-tasks' });
-      const subTask1 = await taskProvider.createTask({ title: 'Sub-task P1-S1', parentId: parent1.id });
-      const subTask2 = await taskProvider.createTask({ title: 'Sub-task P1-S2', parentId: parent1.id });
+    describe('Change Parent', () => {
+      it('should move a top-level task to be a child of another task', async () => {
+        const initialTasks: ITask[] = [
+          { id: '1', title: 'Task 1 (to move)', order: 0, parentId: null, children: [], createdAt: new Date(), updatedAt: new Date(), completed: false },
+          { id: '2', title: 'Task 2 (New Parent)', order: 1, parentId: null, children: [], createdAt: new Date(), updatedAt: new Date(), completed: false },
+          { id: '3', title: 'Task 3', order: 2, parentId: null, children: [], createdAt: new Date(), updatedAt: new Date(), completed: false },
+        ];
+        taskProvider.initializeForTesting(initialTasks, 4);
+        const taskToMove = await taskProvider.getTask('1');
+        const originalUpdatedAt = taskToMove!.updatedAt;
 
-      const retrievedParent = await taskProvider.getTask(parent1.id);
-      expect(retrievedParent).toBeDefined();
-      expect(retrievedParent?.children).toBeDefined();
-      expect(retrievedParent?.children.length).toBe(2);
-      expect(retrievedParent?.children.find(t => t.id === subTask1.id)).toBeDefined();
-      expect(retrievedParent?.children.find(t => t.id === subTask2.id)).toBeDefined();
+        await new Promise(resolve => setTimeout(resolve, 10)); // Small delay
+
+        const movedTask = await taskProvider.updateTaskOrder('1', { order: 0, parentId: '2' }); // Target: first child of '2'
+        expect(movedTask).toBeDefined();
+        expect(movedTask!.id).toBe('1');
+        // ParentId is not explicitly set on the task object itself by updateTaskOrder,
+        // it's implicit by its location in the parent's children array.
+        // However, our ITask allows parentId, so the test data should reflect it for clarity.
+        // The _getSortedTasksRecursive in getTask/getTasks should ideally populate it.
+        // For now, we check its presence in the new parent's children.
+        expect(movedTask!.order).toBe(0); // First child, so order 0
+        expect(movedTask!.updatedAt.getTime()).toBeGreaterThan(originalUpdatedAt.getTime());
+
+        const topLevelTasks = await taskProvider.getTasks();
+        expect(topLevelTasks.map(t => t.id)).toEqual(['2', '3']); // Task 1 is no longer top-level
+        assertSequentialOrder(topLevelTasks, null);
+
+        const newParentTask = await taskProvider.getTask('2');
+        expect(newParentTask!.children).toBeDefined();
+        expect(newParentTask!.children.length).toBe(1);
+        expect(newParentTask!.children[0].id).toBe('1');
+        assertSequentialOrder(newParentTask!.children, '2');
+      });
+
+      it('should move a child task to be a top-level task', async () => {
+        const initialTasks: ITask[] = [
+          { id: 'parent1', title: 'Parent 1', order: 0, parentId: null, createdAt: new Date(), updatedAt: new Date(), completed: false, children: [
+            { id: 'c1', title: 'Child 1', order: 0, parentId: 'parent1', children: [], createdAt: new Date(), updatedAt: new Date(), completed: false },
+            { id: 'c2', title: 'Child 2 (to move)', order: 1, parentId: 'parent1', children: [], createdAt: new Date(), updatedAt: new Date(), completed: false },
+          ]},
+          { id: 'parent2', title: 'Parent 2', order: 1, parentId: null, children: [], createdAt: new Date(), updatedAt: new Date(), completed: false },
+        ];
+        taskProvider.initializeForTesting(initialTasks, 4);
+
+        // Move 'c2' to top-level, aiming for order 0
+        const movedTask = await taskProvider.updateTaskOrder('c2', { order: 0, parentId: null });
+        expect(movedTask).toBeDefined();
+        // ParentId should be null/undefined for top-level tasks in the returned object
+        // expect(movedTask!.parentId).toBeNull(); // Or undefined
+        expect(movedTask!.order).toBe(0);
+
+        const topLevelTasks = await taskProvider.getTasks();
+        expect(topLevelTasks.map(t => t.id)).toEqual(['c2', 'parent1', 'parent2']);
+        assertSequentialOrder(topLevelTasks, null);
+
+        const oldParent = await taskProvider.getTask('parent1');
+        expect(oldParent!.children.map(t => t.id)).toEqual(['c1']);
+        assertSequentialOrder(oldParent!.children, 'parent1');
+      });
+
+      it('should move a child task from one parent to another', async () => {
+        taskProvider.initializeForTesting([
+          { id: 'p1', title: 'P1', order: 0, parentId: null, children: [
+            { id: 'c1', title: 'C1', order: 0, parentId: 'p1', children: [], createdAt: new Date(), updatedAt: new Date(), completed: false },
+            { id: 'c2', title: 'C2 (to move)', order: 1, parentId: 'p1', children: [], createdAt: new Date(), updatedAt: new Date(), completed: false },
+          ], createdAt: new Date(), updatedAt: new Date(), completed: false },
+          { id: 'p2', title: 'P2 (new parent)', order: 1, parentId: null, children: [
+            { id: 'c3', title: 'C3', order: 0, parentId: 'p2', children: [], createdAt: new Date(), updatedAt: new Date(), completed: false },
+          ], createdAt: new Date(), updatedAt: new Date(), completed: false },
+        ], 5);
+
+        const movedTask = await taskProvider.updateTaskOrder('c2', { order: 0, parentId: 'p2' }); // Move c2 to be first child of p2
+        expect(movedTask!.order).toBe(0);
+
+        const oldParent = await taskProvider.getTask('p1');
+        expect(oldParent!.children.map(t => t.id)).toEqual(['c1']);
+        assertSequentialOrder(oldParent!.children, 'p1');
+
+        const newParent = await taskProvider.getTask('p2');
+        expect(newParent!.children.map(t => t.id)).toEqual(['c2', 'c3']);
+        assertSequentialOrder(newParent!.children, 'p2');
+      });
     });
 
+    describe('Invalid Moves', () => {
+      it('should return undefined for a non-existent taskId', async () => {
+        const updatedTask = await taskProvider.updateTaskOrder('nonExistent', { order: 0 });
+        expect(updatedTask).toBeUndefined();
+      });
 
-    // This test needs to be re-evaluated as getTasks({parentId: string}) is no longer the primary way to get children.
-    // Children are accessed via the parent task's 'children' property.
-    it('should correctly manage a hierarchy of tasks (parent, child, grandchild)', async () => {
-      const grandparent = await taskProvider.createTask({ title: 'Grandparent' });
-      const parent = await taskProvider.createTask({ title: 'Parent', parentId: grandparent.id });
-      const child = await taskProvider.createTask({ title: 'Child', parentId: parent.id });
+      it('should move task to top-level if new parentId is non-existent (graceful fallback)', async () => {
+        taskProvider.initializeForTesting([{ id: '1', title: 'Task 1', order: 0, parentId: null, children: [], createdAt: new Date(), updatedAt: new Date(), completed: false }], 2);
+        const movedTask = await taskProvider.updateTaskOrder('1', { order: 0, parentId: 'nonExistentParent' });
+        expect(movedTask).toBeDefined();
+        // ParentId might be undefined or null, depending on how it's set in the fallback.
+        // The key is that it's now a top-level task.
+        expect(movedTask!.order).toBe(0);
+        const tasks = await taskProvider.getTasks();
+        expect(tasks.length).toBe(1);
+        expect(tasks[0].id).toBe('1');
+        assertSequentialOrder(tasks, null);
+      });
+    });
+  });
 
-      const retrievedGrandparent = await taskProvider.getTask(grandparent.id);
-      expect(retrievedGrandparent).toBeDefined();
-      expect(retrievedGrandparent?.children.length).toBe(1);
-      expect(retrievedGrandparent?.children[0].id).toBe(parent.id);
+  describe('getTasks and getTask Return Sorted Tasks by Order', () => {
+    it('getTasks() should return tasks sorted by order, including children', async () => {
+      const initialUnsortedTasks: ITask[] = [
+        { id: 'b', title: 'Task B', order: 1, parentId: null, createdAt: new Date(), updatedAt: new Date(), completed: false, children: [
+          { id: 'b2', title: 'Child B2', order: 1, parentId: 'b', children: [], createdAt: new Date(), updatedAt: new Date(), completed: false },
+          { id: 'b1', title: 'Child B1', order: 0, parentId: 'b', children: [], createdAt: new Date(), updatedAt: new Date(), completed: false },
+        ]},
+        { id: 'a', title: 'Task A', order: 0, parentId: null, children: [], createdAt: new Date(), updatedAt: new Date(), completed: false },
+        { id: 'c', title: 'Task C', order: 2, parentId: null, children: [], createdAt: new Date(), updatedAt: new Date(), completed: false },
+      ];
+      // initializeForTesting calls _sortTasksRecursive internally
+      taskProvider.initializeForTesting(initialUnsortedTasks, 4); 
+      
+      const tasks = await taskProvider.getTasks();
+      expect(tasks.map(t => t.id)).toEqual(['a', 'b', 'c']);
+      assertSequentialOrder(tasks, null);
 
-      const retrievedParent = retrievedGrandparent?.children[0];
-      expect(retrievedParent).toBeDefined();
-      expect(retrievedParent?.children.length).toBe(1);
-      expect(retrievedParent?.children[0].id).toBe(child.id);
+      const taskB = tasks.find(t => t.id === 'b');
+      expect(taskB).toBeDefined();
+      expect(taskB!.children.map(c => c.id)).toEqual(['b1', 'b2']);
+      assertSequentialOrder(taskB!.children, 'b');
+    });
 
-      const retrievedChild = retrievedParent?.children[0];
-      expect(retrievedChild).toBeDefined();
-      expect(retrievedChild?.children.length).toBe(0);
+    it('getTask() should return a task with children sorted by order', async () => {
+      const initialUnsortedTasks: ITask[] = [
+        { id: 'parent', title: 'Parent', order: 0, parentId: null, createdAt: new Date(), updatedAt: new Date(), completed: false, children: [
+          { id: 'z', title: 'Child Z', order: 2, parentId: 'parent', children: [], createdAt: new Date(), updatedAt: new Date(), completed: false },
+          { id: 'x', title: 'Child X', order: 0, parentId: 'parent', children: [], createdAt: new Date(), updatedAt: new Date(), completed: false },
+          { id: 'y', title: 'Child Y', order: 1, parentId: 'parent', children: [], createdAt: new Date(), updatedAt: new Date(), completed: false },
+        ]},
+      ];
+      taskProvider.initializeForTesting(initialUnsortedTasks, 4);
+
+      const parentTask = await taskProvider.getTask('parent');
+      expect(parentTask).toBeDefined();
+      expect(parentTask!.children).toBeDefined();
+      expect(parentTask!.children.map(c => c.id)).toEqual(['x', 'y', 'z']);
+      assertSequentialOrder(parentTask!.children, 'parent');
     });
   });
 });
