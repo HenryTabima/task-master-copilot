@@ -96,6 +96,7 @@
                       "add",
                       "add-subtask",
                       "toggleComplete",
+                      "edit",
                       "delete"
                     ]
                   },

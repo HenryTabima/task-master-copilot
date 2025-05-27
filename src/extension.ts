@@ -23,13 +23,20 @@ applyTo: '**'
 ## Planning Process
 
 - Begin each ticket or feature with a planning session.
-- Use the **TaskTool** to generate a detailed list of tasks to guide implementation.
+- Use the **TaskTool** to generate a detailed list of tasks without description to guide implementation.
 - Each task should be small enough to be completed in a single commit, specific, concrete, and verifiable.
 - Tasks are managed via the **TaskTool**, allowing for subtasks and a clear order of execution.
+- Once the task list is established, edit the tasks description to include comprehensive context.
+- For top-level tasks, the description must detail the overall requirements and objectives.
+- For subtasks, the description must include:
+    - Specific file paths relevant to the task.
+    - References to relevant documentation or sections thereof.
+    - Any other contextual information crucial for the task's successful completion.
 - Update the task list using the **TaskTool** as work progresses.
 
 ## Workflow
 
+- Read the tasks list ate the beginning of each session.
 - IMPORTANT: Ensure tasks are defined using the **TaskTool** before writing code.
 - Implement one task at a time, in the order managed by the **TaskTool** (e.g., by creation order or an explicitly set priority if supported by the tool).
 - Execute commands required for task steps (e.g., for testing, linting, or verification subtasks) directly without seeking additional user confirmation.

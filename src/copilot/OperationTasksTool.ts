@@ -1,11 +1,12 @@
 import * as vscode from 'vscode';
 import { ITaskProvider } from '../mcp/ITaskProvider';
+import { ITask } from '../common/Task';
 
 /**
  * Defines the structure for a single operation within the OperationTasksTool.
  */
 export interface ITaskOperation {
-  action: 'add' | 'toggleComplete' | 'delete' | 'add-subtask';
+  action: 'add' | 'toggleComplete' | 'delete' | 'add-subtask' | 'edit';
   taskId?: string;
   taskTitle?: string;
   taskDescription?: string;
@@ -181,6 +182,51 @@ export class OperationTasksTool implements vscode.LanguageModelTool<IOperationTa
           results.push(`Task with ID "${operation.taskId}" deleted successfully.`);
         } catch (e) {
           results.push(`Error deleting task "${operation.taskId}": ${e instanceof Error ? e.message : String(e)}`);
+        }
+        break;
+
+      case 'edit':
+        if (!operation.taskId) {
+          results.push('Error (edit): taskId is required.');
+          return;
+        }
+        try {
+          const taskToUpdate = await this.taskProvider.getTask(operation.taskId);
+          if (!taskToUpdate) {
+            results.push(`Error (edit): Task with ID "${operation.taskId}" not found.`);
+            return;
+          }
+
+          const updatedTaskData: Partial<Omit<ITask, 'id' | 'createdAt' | 'updatedAt' | 'children'>> = {};
+          let changesMade = false;
+
+          if (operation.taskTitle !== undefined && operation.taskTitle !== taskToUpdate.title) {
+            updatedTaskData.title = operation.taskTitle;
+            changesMade = true;
+          }
+          if (operation.taskDescription !== undefined && operation.taskDescription !== taskToUpdate.description) {
+            updatedTaskData.description = operation.taskDescription;
+            changesMade = true;
+          }
+          if (operation.taskStatus !== undefined && operation.taskStatus !== taskToUpdate.completed) {
+            updatedTaskData.completed = operation.taskStatus;
+            changesMade = true;
+          }
+
+          if (!changesMade) {
+            results.push(`Info (edit): No changes provided for task "${taskToUpdate.title}" (ID: ${operation.taskId}).`);
+            return;
+          }
+
+          const updatedTask = await this.taskProvider.updateTask(operation.taskId, updatedTaskData);
+          if (updatedTask) {
+            results.push(`Task "${updatedTask.title}" (ID: ${operation.taskId}) updated successfully.`);
+          } else {
+            // This case should ideally not be reached if getTask found it, but as a safeguard:
+            results.push(`Error (edit): Failed to update task "${operation.taskId}". Task might have been deleted during operation.`);
+          }
+        } catch (e) {
+          results.push(`Error editing task "${operation.taskId}": ${e instanceof Error ? e.message : String(e)}`);
         }
         break;
 
