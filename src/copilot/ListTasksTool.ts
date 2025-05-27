@@ -5,7 +5,7 @@ import { ITask } from '../common/Task';
 /**
  * Represents a tool that lists all current tasks.
  * This tool does not take any input parameters.
- */
+*/
 export class ListTasksTool implements vscode.LanguageModelTool<Record<string, unknown>> {
   public readonly name = 'listTasksTool';
   public readonly description = 'Lists all current tasks. Does not take any input parameters.';
@@ -40,11 +40,11 @@ export class ListTasksTool implements vscode.LanguageModelTool<Record<string, un
       if (token.isCancellationRequested) {
         throw new vscode.LanguageModelError('List tasks cancelled by user after fetching tasks.');
       }
-
+      
       if (tasks.length === 0) {
         return new vscode.LanguageModelToolResult([new vscode.LanguageModelTextPart('There are no tasks.')]);
       }
-
+      
       let taskListString = this.tasksToListString(tasks);
 
       return new vscode.LanguageModelToolResult([new vscode.LanguageModelTextPart(`Current tasks:\n${taskListString}`)]);
@@ -64,6 +64,8 @@ export class ListTasksTool implements vscode.LanguageModelTool<Record<string, un
         if (task.children && task.children.length > 0) {
           const childrenTaskStrings = task.children.map(childTask => this.formatTask(childTask));
           return `${taskString}\n  ${childrenTaskStrings.join('\n  ')}`;  
+        } else {
+          return taskString;
         }
       })
       .join('\n');
