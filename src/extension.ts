@@ -349,7 +349,7 @@ export async function activate(context: vscode.ExtensionContext) {
   );
   context.subscriptions.push(editTaskDescriptionCommand);
 
-  const createTaskCommand = vscode.commands.registerCommand('copilot-task-master.createTask', async () => {
+  const addTaskCommand = vscode.commands.registerCommand('copilot-task-master.addTask', async () => {
     const title = await vscode.window.showInputBox({
       prompt: 'Enter the title for the new task',
       validateInput: (value) => {
@@ -359,7 +359,6 @@ export async function activate(context: vscode.ExtensionContext) {
 
     if (title && title.trim() !== '') {
       try {
-        // Ensure the argument matches ITaskCreateOptions if defined, or { title: string, description?: string }
         await taskProvider.createTask({ title: title.trim() });
         taskTreeDataProvider.refresh();
         vscode.window.showInformationMessage(`Task "${title.trim()}" created.`);
@@ -370,7 +369,7 @@ export async function activate(context: vscode.ExtensionContext) {
       }
     }
   });
-  context.subscriptions.push(createTaskCommand);
+  context.subscriptions.push(addTaskCommand);
 
   const createSubTaskCommand = vscode.commands.registerCommand(
     'copilot-task-master.createSubTask',

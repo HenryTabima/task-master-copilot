@@ -189,6 +189,11 @@
         "command": "copilot-task-master.createSubTask",
         "title": "Create Sub-Task",
         "icon": "$(add)"
+      },
+      {
+        "command": "copilot-task-master.addTask",
+        "title": "Add Task",
+        "icon": "$(add)"
       }
     ],
     "viewsContainers": {
@@ -269,6 +274,12 @@
         }
       ],
       "view/title": [
+        {
+          "command": "copilot-task-master.addTask",
+          "when": "view == copilot-task-master.tasksView",
+          "group": "navigation",
+          "icon": "$(add)"
+        },
         {
           "command": "copilot-task-master.deleteCompletedTasksFromUI",
           "when": "view == copilot-task-master.tasksView",
