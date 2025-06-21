@@ -13,12 +13,13 @@ import { TextEncoder } from 'util'; // Standard Node.js module
 import * as path from 'path'; // Import path module
 import * as os from 'os'; // Import os module
 
-const INSTRUCTION_FILE_NAME = 'copilot-task-master-workflow.instructions.md';
-// const INSTRUCTION_FILE_RELATIVE_PATH = 'prompts/copilot-task-master-workflow.instructions.md'; // Not strictly needed here if we use INSTRUCTION_FILE_NAME with the dir Uri
+const INSTRUCTION_FILE_NAME = 'plan-workflow.prompt.md';
 
 const PREDEFINED_INSTRUCTION_CONTENT_TEMPLATE = `
 ---
-applyTo: '**'
+mode: 'agent'
+tools: ['listTasksTool', 'toggleTaskCompleteTool', 'operationTaskTool', 'deleteCompletedTasksTool']
+description: 'This is the Copilot Task Master workflow instruction file. It defines how tasks should be planned, executed, and verified in the context of a software development project using Copilot and VS Code.'
 ---
 ## Planning Process
 
@@ -56,6 +57,7 @@ applyTo: '**'
   - STOP
   - If the next task involves code modifications, ask for user confirmation to proceed. For other types of tasks, you may state your intention and proceed.
 - Document all components and functionality developed.
+- once all tasks are completed and user confirm is satisfied with the results, clear all completed tasks
 `.trim();
 
 /**
