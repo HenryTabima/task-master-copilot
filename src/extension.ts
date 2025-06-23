@@ -24,8 +24,9 @@ description: 'This is the Copilot Task Master workflow instruction file. It defi
 ## Planning Process
 
 - Begin each ticket or feature with a planning session.
-- Use the **TaskTool** to generate a detailed list of tasks without description to guide implementation.
-- Each task should be small enough to be completed in a single commit, specific, concrete, and verifiable.
+- Use the **TaskTool** to generate a detailed list of tasks to guide implementation.
+- Tasks must be exclusively for code editing. They should be small enough to be completed in a single commit, specific, concrete, and verifiable.
+- Any necessary prior research, context, or investigation must be included in the task's description, not as a separate task.
 - Tasks are managed via the **TaskTool**, allowing for subtasks and a clear order of execution.
 - Once the task list is established, edit the tasks description to include comprehensive context.
 - For top-level tasks, the description must detail the overall requirements and objectives.
